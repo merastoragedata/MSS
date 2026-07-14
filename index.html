@@ -1,1 +1,1049 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Karjat 400/220/33 kV S/S — Maintenance Portal</title>
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
 
+  <!-- Hill silhouette backdrop (Sahyadri ghats motif) -->
+  <div id="hillscape">
+    <div class="ridge r3">
+      <svg viewBox="0 0 1440 300" preserveAspectRatio="none">
+        <polygon points="0,300 0,180 120,140 260,190 400,110 560,170 720,100 900,175 1080,120 1240,180 1440,140 1440,300"
+                 fill="#152420"/>
+      </svg>
+    </div>
+    <div class="ridge r2">
+      <svg viewBox="0 0 1440 260" preserveAspectRatio="none">
+        <polygon points="0,260 0,150 150,190 300,120 460,175 620,100 800,165 980,110 1160,170 1320,130 1440,160 1440,260"
+                 fill="#101F1A"/>
+      </svg>
+    </div>
+    <div class="ridge r1">
+      <svg viewBox="0 0 1440 220" preserveAspectRatio="none">
+        <polygon points="0,220 0,170 140,200 320,150 500,195 680,140 860,190 1040,150 1220,195 1440,160 1440,220"
+                 fill="#0B1613"/>
+      </svg>
+    </div>
+  </div>
+
+  <canvas id="weatherCanvas"></canvas>
+  <div id="weatherBadge"><span class="dot"></span>Loading weather…</div>
+
+  <div id="app">
+    <div id="topbar">
+      <div class="topbar-inner">
+        <div class="brand" onclick="setView({k:'home'})">
+          <div class="brand-mark">J</div>
+          <div>
+            <div class="brand-title">KARJAT 400/220/33 kV S/S</div>
+            <div class="brand-sub">S/S CODE: J966 · MAHATRANSCO</div>
+          </div>
+        </div>
+        <nav class="mainnav" id="mainnav"></nav>
+        <div class="admin-toggle">
+          <span id="adminLabel">ADMIN MODE</span>
+          <div class="switch on" id="adminSwitch"><div class="knob"></div></div>
+        </div>
+      </div>
+    </div>
+    <main id="mainContent">
+      <div id="appRoot"></div>
+    </main>
+  </div>
+
+  <div id="modalRoot"></div>
+
+  <script>
+/**
+ * EQUIPMENT NOMENCLATURE — derived from SLD_400_kV_Karjat_SS.pdf
+ *
+ * Confirmed pattern (from Bay 402, verified against you):
+ *   <bay-number> - <equipment-code>
+ *   e.g. 402-89A (isolator), 402-89AE (its earth switch), 402-52 (CB, also
+ *   tagged 402-CB), 402-CT (current transformer), 402-89B / 402-89BE
+ *   (isolator + earth switch on the far side of the CB)
+ *
+ * CONFIDENCE LEVELS — please skim once and correct anything wrong; the
+ * portal's admin edit screens let you fix any of this later without a
+ * redeploy, so nothing here is load-bearing/permanent:
+ *   [CONFIRMED]  — read directly off the SLD at 400 DPI, unambiguous
+ *   [PATTERN]    — same 89A/89B/52/CT/LA/CVT/WT template applied to a bay
+ *                  of the same type elsewhere on the 400 kV yard
+ *   [EXTENDED]   — 220 kV / 33 kV equivalents inferred by extending the
+ *                  same "bay-code" convention; the 33 kV Station Transformer
+ *                  bays (31xxx/32xxx tags) ARE confirmed from the legend,
+ *                  everything else on 220 kV/33 kV is EXTENDED and most
+ *                  likely to need your correction
+ */
+
+// ---- 400 kV bay-type equipment templates --------------------------------
+const TPL_400_LINE = (b) => [ // [CONFIRMED] pattern from bays 404/407/410/413
+  { code: `${b}-LA`, label: "Lightning Arrester" },
+  { code: `${b}-CVT`, label: "Capacitive Voltage Transformer" },
+  { code: `${b}-WT`, label: "Wave Trap (Y & B phase)" },
+  { code: `${b}-89L`, label: "Line Isolator" },
+  { code: `${b}-89LE1`, label: "Line Earth Switch 1" },
+  { code: `${b}-89LE2`, label: "Line Earth Switch 2" },
+  { code: `${b}-89A`, label: "Isolator A (Bus side)" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+  { code: `${b}-89B`, label: "Isolator B (Diameter side)" },
+];
+
+const TPL_400_TIE = (b) => [ // [CONFIRMED] — this is the exact Bay 402 you verified
+  { code: `${b}-89A`, label: "Isolator A" },
+  { code: `${b}-89AE`, label: "Earth Switch A" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+  { code: `${b}-89B`, label: "Isolator B" },
+  { code: `${b}-89BE`, label: "Earth Switch B" },
+];
+
+const TPL_400_REACTOR = (b) => [ // [CONFIRMED] read from Bay 401
+  { code: `${b}-LA1`, label: "Lightning Arrester 1" },
+  { code: `${b}-LA2`, label: "Lightning Arrester 2" },
+  { code: `${b}-B/R`, label: "125 MVAr Bus Reactor" },
+  { code: `${b}-89R`, label: "Reactor Isolator" },
+  { code: `${b}-89RE1`, label: "Reactor Earth Switch 1" },
+  { code: `${b}-89RE2`, label: "Reactor Earth Switch 2" },
+  { code: `${b}-89A`, label: "Isolator A" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+  { code: `${b}-89B`, label: "Isolator B" },
+];
+
+const TPL_400_ICT_HV = (b) => [ // [CONFIRMED] read from bays 400/403/406/409
+  { code: `${b}-CVT`, label: "CVT (Y phase)" },
+  { code: `${b}-89B`, label: "Isolator B (ICT side)" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-89A`, label: "Isolator A (Bus side)" },
+];
+
+const TPL_400_FUTURE = (b) => [ // [PATTERN] — dashed provision shown on SLD for bays 412/415
+  { code: `${b}-89A`, label: "Isolator A (provisioned)" },
+  { code: `${b}-89AE`, label: "Earth Switch A (provisioned)" },
+  { code: `${b}-52`, label: "Circuit Breaker (provisioned)" },
+  { code: `${b}-CT`, label: "Current Transformer (provisioned)" },
+  { code: `${b}-89B`, label: "Isolator B (provisioned)" },
+  { code: `${b}-89BE`, label: "Earth Switch B (provisioned)" },
+];
+
+// ---- 220 kV bay-type equipment templates (Double Main + Transfer Bus) ---
+// [EXTENDED] — same bay-code convention, please correct exact isolator
+// tags once you can check the 220 kV portion of the SLD closely.
+const TPL_220_LINE = (b) => [
+  { code: `${b}-LA`, label: "Lightning Arrester" },
+  { code: `${b}-CVT`, label: "Capacitive Voltage Transformer" },
+  { code: `${b}-89L`, label: "Line Isolator" },
+  { code: `${b}-89LE`, label: "Line Earth Switch" },
+  { code: `${b}-89-1`, label: "Isolator — Main Bus I" },
+  { code: `${b}-89-2`, label: "Isolator — Main Bus II" },
+  { code: `${b}-89TR`, label: "Isolator — Transfer Bus" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+];
+
+const TPL_220_ICT_IV = (b) => [
+  { code: `${b}-89A`, label: "Isolator A (ICT side)" },
+  { code: `${b}-89-1`, label: "Isolator — Main Bus I" },
+  { code: `${b}-89-2`, label: "Isolator — Main Bus II" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+];
+
+const TPL_220_BC = (b) => [
+  { code: `${b}-89-1`, label: "Isolator — Main Bus I" },
+  { code: `${b}-89-2`, label: "Isolator — Main Bus II" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+];
+
+const TPL_220_TBC = (b) => [
+  { code: `${b}-89-1`, label: "Isolator — Main Bus" },
+  { code: `${b}-89TR`, label: "Isolator — Transfer Bus" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+];
+
+// ---- 33 kV yard -----------------------------------------------------------
+// Station Transformer bays [CONFIRMED] — read directly off the 33 kV legend
+// inset (STN TRANFO-01 uses the "31" prefix, STN TRANFO-02 the "32" prefix).
+const TPL_33_STNTFR = (b, prefix) => [
+  { code: `${prefix}HGF`, label: "HG Fuse" },
+  { code: `${prefix}89T1`, label: "Isolator T1" },
+  { code: `${prefix}89T2`, label: "Isolator T2" },
+  { code: `${prefix}MCT1`, label: "Metering CT" },
+  { code: `${prefix}MPT1`, label: "Metering PT" },
+  { code: `${prefix}LA`, label: "Lightning Arrester" },
+];
+
+// [EXTENDED] — 33 kV line bay & bus sectionaliser bay; no direct legend read.
+const TPL_33_LINE = (b) => [
+  { code: `${b}-LA`, label: "Lightning Arrester" },
+  { code: `${b}-89L`, label: "Line Isolator" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+  { code: `${b}-CT`, label: "Current Transformer" },
+];
+
+const TPL_33_BS = (b) => [
+  { code: `${b}-89-1`, label: "Isolator — Section 1" },
+  { code: `${b}-89-2`, label: "Isolator — Section 2" },
+  { code: `${b}-52`, label: "Circuit Breaker" },
+];
+
+// ---------------------------------------------------------------------------
+function equipmentForBay(bay) {
+  switch (bay.type) {
+    case "Line":
+      return bay.voltage === "220" ? TPL_220_LINE(bay.id) : TPL_400_LINE(bay.id);
+    case "Tie":
+      return TPL_400_TIE(bay.id);
+    case "Reactor":
+      return TPL_400_REACTOR(bay.id);
+    case "ICT-HV":
+      return TPL_400_ICT_HV(bay.id);
+    case "ICT-IV":
+      return TPL_220_ICT_IV(bay.id);
+    case "Future":
+      return TPL_400_FUTURE(bay.id);
+    case "BC":
+      return TPL_220_BC(bay.id);
+    case "TBC":
+      return TPL_220_TBC(bay.id);
+    case "StnTfr33":
+      return TPL_33_STNTFR(bay.id, bay.id === "33-T1" ? "31" : "32");
+    case "Line33":
+      return TPL_33_LINE(bay.id);
+    case "BS33":
+      return TPL_33_BS(bay.id);
+    default:
+      return [];
+  }
+}
+
+  </script>
+  <script>
+/* =============================================================================
+   WEATHER LAYER — fetches live conditions for Karjat (Open-Meteo, no API key)
+   and paints rain / mist on #weatherCanvas accordingly. This is what makes
+   "rain on-site = heavy rain on the website" actually true, not simulated.
+   Falls back to a gentle default mist if the weather fetch fails (e.g. no
+   network in this sandbox) so the site still looks alive.
+   ========================================================================== */
+
+const WeatherFX = {
+  canvas: null, ctx: null, w: 0, h: 0,
+  mode: "clear",       // clear | cloudy | fog | drizzle | rain | storm
+  intensity: 0,         // 0..1
+  drops: [],
+  mistBlobs: [],
+  raf: null,
+};
+
+function classifyWeatherCode(code) {
+  if ([0, 1].includes(code)) return { mode: "clear", intensity: 0 };
+  if ([2, 3].includes(code)) return { mode: "cloudy", intensity: 0.15 };
+  if ([45, 48].includes(code)) return { mode: "fog", intensity: 0.5 };
+  if ([51, 53, 55, 56, 57].includes(code)) return { mode: "drizzle", intensity: 0.35 };
+  if ([61, 63, 80, 81].includes(code)) return { mode: "rain", intensity: 0.65 };
+  if ([65, 66, 67, 82, 95, 96, 99].includes(code)) return { mode: "storm", intensity: 1 };
+  return { mode: "cloudy", intensity: 0.15 };
+}
+
+async function fetchKarjatWeather() {
+  try {
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.LAT}&longitude=${CONFIG.LON}&current=temperature_2m,precipitation,weather_code&timezone=auto`;
+    const res = await fetch(url);
+    const data = await res.json();
+    const code = data.current.weather_code;
+    const temp = data.current.temperature_2m;
+    const { mode, intensity } = classifyWeatherCode(code);
+    return { mode, intensity, temp, ok: true };
+  } catch (e) {
+    return { mode: "cloudy", intensity: 0.15, temp: null, ok: false };
+  }
+}
+
+function initWeather() {
+  const canvas = document.getElementById("weatherCanvas");
+  WeatherFX.canvas = canvas;
+  WeatherFX.ctx = canvas.getContext("2d");
+  resizeWeatherCanvas();
+  window.addEventListener("resize", resizeWeatherCanvas);
+
+  fetchKarjatWeather().then((w) => {
+    WeatherFX.mode = w.mode;
+    WeatherFX.intensity = w.intensity;
+    seedParticles();
+    updateWeatherBadge(w);
+    loopWeather();
+  });
+
+  // refresh conditions every 15 min
+  setInterval(async () => {
+    const w = await fetchKarjatWeather();
+    WeatherFX.mode = w.mode;
+    WeatherFX.intensity = w.intensity;
+    seedParticles();
+    updateWeatherBadge(w);
+  }, 15 * 60 * 1000);
+}
+
+function updateWeatherBadge(w) {
+  const el = document.getElementById("weatherBadge");
+  if (!el) return;
+  const labels = { clear: "Clear", cloudy: "Cloudy", fog: "Misty ridge", drizzle: "Light rain", rain: "Rain", storm: "Heavy rain" };
+  el.innerHTML = `<span class="dot"></span>Karjat · ${labels[w.mode] || "—"}${w.temp != null ? ` · ${Math.round(w.temp)}°C` : ""}`;
+}
+
+function resizeWeatherCanvas() {
+  const c = WeatherFX.canvas; if (!c) return;
+  WeatherFX.w = c.width = window.innerWidth;
+  WeatherFX.h = c.height = window.innerHeight;
+}
+
+function seedParticles() {
+  const { mode, intensity, w, h } = { ...WeatherFX, w: WeatherFX.w, h: WeatherFX.h };
+  const dropCount = mode === "storm" ? 220 : mode === "rain" ? 140 : mode === "drizzle" ? 60 : 0;
+  WeatherFX.drops = Array.from({ length: dropCount }, () => ({
+    x: Math.random() * w,
+    y: Math.random() * h,
+    len: 10 + Math.random() * (mode === "storm" ? 22 : 14),
+    speed: (mode === "storm" ? 11 : mode === "rain" ? 8 : 5) + Math.random() * 4,
+    drift: mode === "storm" ? 2.4 : 1.1,
+  }));
+  const mistCount = (mode === "fog" ? 10 : mode === "cloudy" ? 4 : 2);
+  WeatherFX.mistBlobs = Array.from({ length: mistCount }, () => ({
+    x: Math.random() * w, y: h * (0.55 + Math.random() * 0.4),
+    r: 180 + Math.random() * 220, speed: 0.15 + Math.random() * 0.2,
+  }));
+}
+
+function loopWeather() {
+  const { ctx, w, h, mode, intensity } = WeatherFX;
+  ctx.clearRect(0, 0, w, h);
+
+  // drifting mist (present in fog/cloudy/rain — a wet hill station is rarely bone-dry-clear)
+  WeatherFX.mistBlobs.forEach((m) => {
+    m.x += m.speed;
+    if (m.x - m.r > w) m.x = -m.r;
+    const grad = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
+    grad.addColorStop(0, `rgba(150,190,175,${0.05 + intensity * 0.04})`);
+    grad.addColorStop(1, "rgba(150,190,175,0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+  });
+
+  // rain streaks
+  if (WeatherFX.drops.length) {
+    ctx.strokeStyle = mode === "storm" ? "rgba(180,215,230,0.55)" : "rgba(180,215,230,0.38)";
+    ctx.lineWidth = mode === "storm" ? 1.6 : 1.1;
+    WeatherFX.drops.forEach((d) => {
+      ctx.beginPath();
+      ctx.moveTo(d.x, d.y);
+      ctx.lineTo(d.x - d.drift, d.y + d.len);
+      ctx.stroke();
+      d.y += d.speed; d.x -= d.drift * 0.4;
+      if (d.y > h) { d.y = -d.len; d.x = Math.random() * w; }
+    });
+  }
+
+  WeatherFX.raf = requestAnimationFrame(loopWeather);
+}
+
+  </script>
+  <script>
+/* =============================================================================
+   KARJAT 400/220/33 kV SUBSTATION PORTAL — APP LOGIC
+   Vanilla JS SPA. Talks to Google Apps Script (code.gs) backed by a Google
+   Sheet. Until API_URL is set it runs in DEMO MODE against localStorage so
+   you (and I) can fully click through it before deployment.
+   ========================================================================== */
+
+// ---------------------------------------------------------------------------
+// 1) CONFIG — paste your Apps Script /exec URL here once deployed.
+// ---------------------------------------------------------------------------
+const CONFIG = {
+  API_URL: "", // <-- e.g. "https://script.google.com/macros/s/AKfycb.../exec"
+  SUBSTATION_NAME: "KARJAT 400/220/33 kV S/S",
+  SS_CODE: "J966",
+  // Karjat, Raigad district, Maharashtra — used for live weather
+  LAT: 18.9107,
+  LON: 73.3260,
+};
+
+const DEMO_MODE = !CONFIG.API_URL;
+
+// ---------------------------------------------------------------------------
+// 2) BAY MASTER (fallback/seed data — mirrors the Sheet's Bays tab)
+// ---------------------------------------------------------------------------
+const BAY_MASTER = [
+  { id: "400", name: "400/220 kV 167 MVA SPARE ICT", voltage: "400", type: "ICT-HV", ictGroup: "ICT-SPARE", status: "Active" },
+  { id: "401", name: "400 kV 125 MVAr BUS REACTOR", voltage: "400", type: "Reactor", status: "Active" },
+  { id: "402", name: "400 kV Tie Bay 1 (Bus Reactor - ICT 1)", voltage: "400", type: "Tie", status: "Active" },
+  { id: "403", name: "400/220 kV 501 MVA ICT 1 HV", voltage: "400", type: "ICT-HV", ictGroup: "ICT1", status: "Active" },
+  { id: "404", name: "400 kV KARJAT - GIRAWALI CKT 1", voltage: "400", type: "Line", status: "Active" },
+  { id: "405", name: "400 kV TIE BAY 2 (GIRAWALI 1 - ICT 2)", voltage: "400", type: "Tie", status: "Active" },
+  { id: "406", name: "400/220 kV 501 MVA ICT 2 HV", voltage: "400", type: "ICT-HV", ictGroup: "ICT2", status: "Active" },
+  { id: "407", name: "400 kV KARJAT - GIRAWALI CKT 2", voltage: "400", type: "Line", status: "Active" },
+  { id: "408", name: "400 kV TIE BAY 3 (GIRAWALI 2 - FUT BAY 1)", voltage: "400", type: "Tie", status: "Active" },
+  { id: "409", name: "400/220 kV 501 MVA ICT 3 HV", voltage: "400", type: "ICT-HV", ictGroup: "ICT3", status: "Active" },
+  { id: "410", name: "400 kV KARJAT - LONIKAND CKT 1", voltage: "400", type: "Line", status: "Active" },
+  { id: "411", name: "400 kV TIE BAY 4 (LONIKAND 1 - FUT BAY 2)", voltage: "400", type: "Tie", status: "Active" },
+  { id: "412", name: "400 kV FUTURE BAY 2", voltage: "400", type: "Future", status: "Future" },
+  { id: "413", name: "400 kV KARJAT - LONIKAND CKT 2", voltage: "400", type: "Line", status: "Active" },
+  { id: "414", name: "400 kV TIE BAY 5 (LONIKAND 2 - FUT BAY 3)", voltage: "400", type: "Tie", status: "Active" },
+  { id: "415", name: "400 kV FUTURE BAY 3", voltage: "400", type: "Future", status: "Future" },
+  { id: "202", name: "220 kV ICT 3 IV", voltage: "220", type: "ICT-IV", ictGroup: "ICT3", status: "Active" },
+  { id: "203", name: "220 kV ICT 2 IV", voltage: "220", type: "ICT-IV", ictGroup: "ICT2", status: "Active" },
+  { id: "204", name: "220 kV ICT 1 IV", voltage: "220", type: "ICT-IV", ictGroup: "ICT1", status: "Active" },
+  { id: "205", name: "220 kV KARJAT - AHILYANAGAR CKT", voltage: "220", type: "Line", status: "Active" },
+  { id: "206", name: "220 kV KARJAT - BHOSE CKT", voltage: "220", type: "Line", status: "Active" },
+  { id: "207", name: "220 kV BUS COUPLER", voltage: "220", type: "BC", status: "Active" },
+  { id: "208", name: "220 kV TBC", voltage: "220", type: "TBC", status: "Active" },
+  { id: "209", name: "220 kV KARJAT - SHIRSUPHAL CKT", voltage: "220", type: "Line", status: "Active" },
+  { id: "210", name: "220 kV KARJAT - BHIGWAN CKT", voltage: "220", type: "Line", status: "Active" },
+  { id: "211", name: "220 kV KARJAT - JEUR CKT 1", voltage: "220", type: "Line", status: "Active" },
+  { id: "212", name: "220 kV KARJAT - JEUR CKT 2", voltage: "220", type: "Line", status: "Active" },
+  { id: "33-L1", name: "33 kV Line Bay", voltage: "33", type: "Line33", status: "Active" },
+  { id: "33-BS1", name: "33 kV Bus Sectionaliser Bay", voltage: "33", type: "BS33", status: "Active" },
+  { id: "33-T1", name: "33 kV Station Transformer Bay 1", voltage: "33", type: "StnTfr33", status: "Active" },
+  { id: "33-T2", name: "33 kV Station Transformer Bay 2", voltage: "33", type: "StnTfr33", status: "Active" },
+];
+
+const ICT_GROUPS = [
+  { id: "ICT1", label: "ICT 1 — 501 MVA", hv: "403", iv: "204" },
+  { id: "ICT2", label: "ICT 2 — 501 MVA", hv: "406", iv: "203" },
+  { id: "ICT3", label: "ICT 3 — 501 MVA", hv: "409", iv: "202" },
+  { id: "ICT-SPARE", label: "Spare ICT — 167 MVA", hv: "400", iv: null },
+];
+
+const STATUS_OPTIONS = ["Active", "Commissioning Soon", "Future", "Under Maintenance", "Out of Service"];
+
+const REMARK_POOLS = {
+  general: ["Found OK. Checked and recorded in register.", "Checked — no abnormality observed.", "Inspected. Parameters within normal range.", "Physically verified — in order."],
+  cleaning: ["Cleaned thoroughly.", "Cleaning done.", "Cleaned — OK.", "Dust/dirt removed, cleaned."],
+  tightness: ["Checked for tightness — OK.", "Tightening done.", "Connections tightened & verified.", "Checked, tight."],
+  leakage: ["No leakage found.", "No leakage observed on inspection.", "Checked — leak-free.", "No leakage on bushings/joints."],
+  pressure: ["Pressure found OK / as per norms.", "Gas/oil pressure in order.", "Pressure verified within limits.", "Checked — normal pressure."],
+  meggering: ["Insulation resistance within limits.", "IR value healthy — logged in register.", "Megger test OK.", "IR test satisfactory."],
+};
+function poolFor(code) {
+  const c = code.toLowerCase();
+  if (c.includes("52") || c.includes("cb")) return "tightness";
+  if (c.includes("ct") || c.includes("pt")) return "meggering";
+  if (c.includes("la") || c.includes("cvt")) return "leakage";
+  if (c.includes("89")) return "pressure";
+  return "general";
+}
+function pickRemark(code) {
+  const arr = REMARK_POOLS[poolFor(code)];
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+
+// ---------------------------------------------------------------------------
+// 3) API CLIENT (real or demo/localStorage)
+// ---------------------------------------------------------------------------
+const DemoDB = {
+  key: "karjat_portal_demo_v1",
+  read() {
+    try { return JSON.parse(localStorage.getItem(this.key)) || { bays: {}, records: {}, prefillUsers: [], sld: {} }; }
+    catch { return { bays: {}, records: {}, prefillUsers: [], sld: {} }; }
+  },
+  write(db) { localStorage.setItem(this.key, JSON.stringify(db)); },
+};
+
+async function apiGet(action, params = {}) {
+  if (DEMO_MODE) return demoGet(action, params);
+  const qs = new URLSearchParams({ action, ...params }).toString();
+  const res = await fetch(`${CONFIG.API_URL}?${qs}`);
+  return res.json();
+}
+async function apiPost(action, body = {}) {
+  if (DEMO_MODE) return demoPost(action, body);
+  const res = await fetch(CONFIG.API_URL, {
+    method: "POST",
+    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
+    body: JSON.stringify({ action, ...body }),
+  });
+  return res.json();
+}
+
+function demoGet(action, params) {
+  const db = DemoDB.read();
+  if (action === "getBays") {
+    const bays = BAY_MASTER.map((b) => ({ ...b, ...(db.bays[b.id] || {}) }));
+    return { bays };
+  }
+  if (action === "getMaintenance") return { records: db.records[params.bayId] || [] };
+  if (action === "getPrefillUsers") return { users: db.prefillUsers };
+  if (action === "getSLD") return { drawing: db.sld[params.bayId] || null };
+  return {};
+}
+function demoPost(action, body) {
+  const db = DemoDB.read();
+  if (action === "updateBayStatus") {
+    db.bays[body.bayId] = { ...(db.bays[body.bayId] || {}), status: body.status };
+  } else if (action === "renameBay") {
+    db.bays[body.bayId] = { ...(db.bays[body.bayId] || {}), name: body.name };
+  } else if (action === "logMaintenance") {
+    const gid = body.groupId || crypto.randomUUID();
+    db.records[body.bayId] = db.records[body.bayId] || [];
+    db.records[body.bayId].push({ ...body.entries, GroupID: gid, CreatedAt: new Date().toISOString() });
+  } else if (action === "setPrefillUsers") {
+    db.prefillUsers = body.users;
+  } else if (action === "saveSLD") {
+    db.sld[body.bayId] = body.drawing;
+  }
+  DemoDB.write(db);
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// 4) DATE / DUE-DATE HELPERS
+// ---------------------------------------------------------------------------
+function currentFY(d = new Date()) {
+  const y = d.getFullYear(), m = d.getMonth() + 1;
+  return m >= 4 ? `FY ${y}-${String(y + 1).slice(2)}` : `FY ${y - 1}-${String(y).slice(2)}`;
+}
+function addMonths(date, n) { const d = new Date(date); d.setMonth(d.getMonth() + n); return d; }
+function daysBetween(a, b) { return Math.round((b - a) / 86400000); }
+
+const CYCLE_MONTHS = { Monthly: 1, Quarterly: 3, Annual: 12 };
+
+// returns { lastDate, nextDue, tone: 'ok'|'warn'|'overdue', daysLeft }
+function dueStatus(category, records) {
+  const list = records.filter((r) => r.Category === category).sort((a, b) => new Date(b.Date) - new Date(a.Date));
+  const last = list[0];
+  if (!last) return { lastDate: null, nextDue: null, tone: "overdue", label: "Never logged" };
+  const nextDue = addMonths(last.Date, CYCLE_MONTHS[category]);
+  const daysLeft = daysBetween(new Date(), nextDue);
+  let tone;
+  if (category === "Monthly") {
+    tone = daysLeft < 0 ? "overdue" : daysLeft <= 14 ? "warn" : "ok";
+  } else {
+    tone = daysLeft < 0 ? "overdue" : daysLeft <= 60 ? "warn" : "ok";
+  }
+  return { lastDate: last.Date, nextDue: nextDue.toISOString().slice(0, 10), tone, daysLeft };
+}
+function duePillHTML(status) {
+  const label = status.lastDate
+    ? `Last: ${status.lastDate} · Next due: ${status.nextDue}`
+    : "Never logged — due now";
+  return `<span class="due-pill ${status.tone}"><span class="dot"></span>${label}</span>`;
+}
+
+// ---------------------------------------------------------------------------
+// 5) STATE
+// ---------------------------------------------------------------------------
+const State = {
+  view: { k: "home" },
+  bays: [],
+  isAdmin: true,
+  prefillUsers: [],
+  currentUser: "Guest User",
+};
+
+async function loadAll() {
+  const { bays } = await apiGet("getBays");
+  State.bays = bays;
+  const { users } = await apiGet("getPrefillUsers");
+  State.prefillUsers = users || [];
+}
+
+function findBay(id) { return State.bays.find((b) => b.id === id); }
+
+// ---------------------------------------------------------------------------
+// 6) RENDER — router
+// ---------------------------------------------------------------------------
+const app = document.getElementById("appRoot");
+
+function setView(v) { State.view = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
+
+async function render() {
+  renderTopbar();
+  const v = State.view;
+  if (v.k === "home") return renderHome();
+  if (v.k === "400") return renderBayGrid("400", "400 kV Bays — 1½ Circuit Breaker Scheme (each bay = one CB)");
+  if (v.k === "220") return renderBayGrid("220", "220 kV Bays — Double Main + Transfer Bus");
+  if (v.k === "33") return renderBayGrid("33", "33 kV Yard");
+  if (v.k === "ict") return renderICTList();
+  if (v.k === "ictDetail") return renderICTDetail(v.id);
+  if (v.k === "bay") return renderBayDetail(v.id);
+  if (v.k === "admin") return renderAdmin();
+  if (v.k === "gallery" || v.k === "battery" || v.k === "dg" || v.k === "other") return renderStub(v.k);
+  return renderHome();
+}
+
+function renderTopbar() {
+  const nav = [
+    ["home", "Home"], ["400", "400 kV Bays"], ["220", "220 kV Bays"],
+    ["ict", "ICTs"], ["33", "33 kV Yard"], ["gallery", "Photo Gallery"], ["admin", "Admin"],
+  ];
+  document.getElementById("mainnav").innerHTML = nav.map(([k, label]) =>
+    `<button class="${State.view.k === k ? "active" : ""}" onclick="setView({k:'${k}'})">${label}</button>`
+  ).join("");
+  const sw = document.getElementById("adminSwitch");
+  sw.className = "switch" + (State.isAdmin ? " on" : "");
+  document.getElementById("adminLabel").textContent = State.isAdmin ? "ADMIN MODE" : "USER MODE";
+}
+
+function busbarSVG() {
+  return `<svg class="busbar" viewBox="0 0 400 10" preserveAspectRatio="none">
+    <line x1="0" y1="5" x2="400" y2="5" stroke="var(--border)" stroke-width="1"/>
+    <line x1="0" y1="5" x2="400" y2="5" stroke="var(--accent)" stroke-width="1" stroke-dasharray="2 6" opacity=".55"/>
+    ${[40,120,200,280,360].map(x => `<rect x="${x-3}" y="2" width="6" height="6" fill="var(--bg)" stroke="var(--amber)" stroke-width="1"/>`).join("")}
+  </svg>`;
+}
+
+function statusBadgeClass(status) {
+  if (status === "Active") return "active";
+  if (status === "Commissioning Soon") return "soon";
+  if (status === "Future") return "future";
+  return "dim";
+}
+
+function statusEditor(bay) {
+  return `<select class="status-select" onclick="event.stopPropagation()" onchange="updateStatus('${bay.id}', this.value)">
+    ${STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === bay.status ? "selected" : ""}>${s}</option>`).join("")}
+  </select>`;
+}
+async function updateStatus(bayId, status) {
+  await apiPost("updateBayStatus", { bayId, status, user: State.currentUser });
+  const b = findBay(bayId); if (b) b.status = status;
+  render();
+}
+
+// ---------------------------------------------------------------------------
+// HOME
+// ---------------------------------------------------------------------------
+function countLogged(ids) {
+  // demo/local heuristic count — real count comes per-bay when opened
+  return null;
+}
+function renderHome() {
+  const cats = [
+    { k: "400", title: "400 kV Lines & Bays", sub: "1½ CB scheme", count: State.bays.filter(b=>b.voltage==="400").length },
+    { k: "220", title: "220 kV Lines & Bays", sub: "Double Main + Transfer", count: State.bays.filter(b=>b.voltage==="220").length },
+    { k: "ict", title: "ICTs", sub: "501/167 MVA, phase-wise", count: ICT_GROUPS.length },
+    { k: "33", title: "33 kV Yard", sub: "Line, BS, Stn. Transformers", count: State.bays.filter(b=>b.voltage==="33").length },
+    { k: "battery", title: "Battery Set", sub: "Charger & bank", count: 1 },
+    { k: "dg", title: "DG Set", sub: "Proforma pending", count: 1 },
+    { k: "other", title: "Other Maintenance", sub: "Civil / misc.", count: "—" },
+    { k: "gallery", title: "Photo Gallery", sub: "Site & equipment photos", count: "—" },
+  ];
+  app.innerHTML = `
+    <div class="eyebrow">${currentFY()}</div>
+    <h1 class="page-title">Substation overview</h1>
+    <div class="page-sub">Recent activity by element type. Tap a category to open its bay list.</div>
+    ${busbarSVG()}
+    <div class="grid">
+      ${cats.map(c => `
+        <div class="card clickable" onclick="setView({k:'${c.k}'})">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start">
+            <div>
+              <div style="font-family:var(--display);font-weight:700;font-size:15px">${c.title}</div>
+              <div style="font-size:12px;color:var(--dim);margin-top:2px">${c.sub}</div>
+            </div>
+            <div style="font-family:var(--mono);font-size:20px;color:var(--accent)">${c.count}</div>
+          </div>
+          <div class="dashed-divider" style="font-size:11.5px;color:var(--dim);margin-top:10px">Tap to open</div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// BAY GRID
+// ---------------------------------------------------------------------------
+function renderBayGrid(voltage, title) {
+  const bays = State.bays.filter((b) => b.voltage === voltage);
+  const groups = {};
+  bays.forEach((b) => { (groups[b.type] = groups[b.type] || []).push(b); });
+
+  app.innerHTML = `
+    <h1 class="page-title">${title}</h1>
+    ${busbarSVG()}
+    ${Object.entries(groups).map(([type, list]) => `
+      <div class="section-block">
+        <div class="type-label">${type} · ${list.length}</div>
+        <div class="grid">
+          ${list.map((b) => `
+            <div class="card clickable" onclick="setView({k:'bay',id:'${b.id}'})">
+              <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+                <div style="font-family:var(--mono);font-size:11px;color:var(--copper)">BAY ${b.id}</div>
+                ${statusEditor(b)}
+              </div>
+              <div style="font-size:13.5px;margin-top:8px;font-weight:600;line-height:1.35">${b.name}</div>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `).join("")}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// ICT LIST / DETAIL
+// ---------------------------------------------------------------------------
+function renderICTList() {
+  app.innerHTML = `
+    <h1 class="page-title">ICTs</h1>
+    <div class="page-sub">Phase-wise units (R / Y / B), each with a tertiary delta bay. Tap a group to open its 5 tabs.</div>
+    ${busbarSVG()}
+    <div class="grid">
+      ${ICT_GROUPS.map((g) => `
+        <div class="card clickable" onclick="setView({k:'ictDetail',id:'${g.id}'})">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--copper)">${g.id}</div>
+          <div style="font-size:14px;font-weight:600;margin-top:8px">${g.label}</div>
+          <div style="font-size:11.5px;color:var(--dim);margin-top:4px">
+            HV: Bay ${g.hv} ${g.iv ? `· IV: Bay ${g.iv}` : "· No IV pairing (spare)"}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderICTDetail(groupId) {
+  const g = ICT_GROUPS.find((x) => x.id === groupId);
+  if (!g) { app.innerHTML = `<div class="empty-note">ICT group not found</div>`; return; }
+  const tabs = [["R","ICT — R Phase"],["Y","ICT — Y Phase"],["B","ICT — B Phase"],["TD","Tertiary Delta Bay"],["RRS","RRS Region"]];
+  const active = State._ictTab || "R";
+  app.innerHTML = `
+    <button class="btn ghost sm" onclick="setView({k:'ict'})">← All ICTs</button>
+    <h1 class="page-title" style="margin-top:10px">${g.label}</h1>
+    <div class="page-sub">HV Bay ${g.hv} ${g.iv ? `· IV Bay ${g.iv}` : ""} — "RRS Region" label kept exactly as specified; flag if it should read differently.</div>
+    ${busbarSVG()}
+    <div class="tabs">
+      ${tabs.map(([k,label]) => `<button class="tab ${active===k?"active":""}" onclick="State._ictTab='${k}';render()">${label}</button>`).join("")}
+    </div>
+    <div class="card">
+      <div class="empty-note">${tabs.find(t=>t[0]===active)[1]} maintenance log — equipment-specific checklist lands here next (bushings, OLTC, oil, Buchholz, WTI/OTI per phase, etc.)</div>
+    </div>
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// BAY DETAIL
+// ---------------------------------------------------------------------------
+async function renderBayDetail(bayId) {
+  const bay = findBay(bayId);
+  if (!bay) { app.innerHTML = `<div class="empty-note">Bay not found</div>`; return; }
+  const { records } = await apiGet("getMaintenance", { bayId });
+  State._records = records;
+  const tab = State._bayTab || "Monthly";
+  const sldRes = await apiGet("getSLD", { bayId });
+  State._sld = sldRes.drawing;
+
+  const equipment = equipmentForBay(bay);
+
+  app.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+      <div>
+        <div style="font-family:var(--mono);font-size:12px;color:var(--copper)">BAY ${bay.id}</div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
+          <h1 class="page-title" style="margin:0" id="bayNameDisplay">${bay.name}</h1>
+          <button class="btn ghost sm" onclick="editBayName('${bay.id}')">edit name</button>
+        </div>
+        <div style="margin-top:8px">${statusEditor(bay)}</div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" onclick="openSLDEditor('${bay.id}')">🗺 Draw / View SLD</button>
+        <button class="btn" onclick="openCascadeLogger('${bay.id}')">+ Log Maintenance Entry</button>
+      </div>
+    </div>
+
+    ${busbarSVG()}
+
+    <div class="tabs">
+      ${["Monthly","Quarterly","Annual"].map((t) => `<button class="tab ${tab===t?"active":""}" onclick="State._bayTab='${t}';render()">${t}</button>`).join("")}
+    </div>
+
+    <div style="margin-bottom:16px">${duePillHTML(dueStatus(tab, records))}</div>
+
+    <div class="type-label">Equipment covered on this bay (${equipment.length})</div>
+    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px">
+      ${equipment.map(e => `<span class="badge dim" title="${e.label}">${e.code}</span>`).join("")}
+    </div>
+
+    <div id="historyList"></div>
+
+    <div class="section-block" style="margin-top:28px">
+      <div class="type-label">SLD — this bay</div>
+      <div class="sld-frame" id="sldFrame">
+        ${State._sld ? `<img src="${State._sld.dataUrl}" alt="Bay SLD"/>` : `<div class="sld-empty">No drawing saved yet. Click "Draw / View SLD" above — it opens seeded from the master station SLD for this bay.</div>`}
+      </div>
+    </div>
+  `;
+  renderHistory(records, tab);
+}
+
+function renderHistory(records, category) {
+  const fyOnly = !!State._fyOnly;
+  let list = records.filter((r) => r.Category === category).sort((a,b) => new Date(b.Date) - new Date(a.Date));
+  if (fyOnly) list = list.filter((r) => currentFY(new Date(r.Date)) === currentFY());
+  const html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim)">${list.length} entr${list.length===1?"y":"ies"} · reverse chronological</div>
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);cursor:pointer">
+        <input type="checkbox" ${fyOnly?"checked":""} onchange="State._fyOnly=this.checked;render()"/> Current FY only (${currentFY()})
+      </label>
+    </div>
+    ${list.length === 0 ? `<div class="empty-note">No entries yet.</div>` : list.map((r) => {
+      const remarks = typeof r.Remarks === "object" ? r.Remarks : (r.RemarksJSON ? JSON.parse(r.RemarksJSON) : (r.remarks || {}));
+      return `
+      <div class="hist-row">
+        <div class="hist-top">
+          <span class="hist-date">${r.Date}</span>
+          <span style="color:var(--dim)">${r.LoggedBy || r.loggedBy || "—"}</span>
+        </div>
+        <div class="hist-remarks">
+          ${Object.entries(remarks).filter(([,v]) => v).map(([k,v]) => `<div class="hist-remark"><b>${k}:</b> ${v}</div>`).join("")}
+        </div>
+      </div>`;
+    }).join("")}
+  `;
+  document.getElementById("historyList").innerHTML = html;
+}
+
+async function editBayName(bayId) {
+  const bay = findBay(bayId);
+  const name = prompt("Bay name:", bay.name);
+  if (name && name.trim()) {
+    await apiPost("renameBay", { bayId, name: name.trim(), user: State.currentUser });
+    bay.name = name.trim();
+    render();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// CASCADE LOGGER: Monthly -> ask Quarterly -> ask Annual
+// ---------------------------------------------------------------------------
+function emptyEntry(seed) {
+  return { date: new Date().toISOString().slice(0,10), loggedBy: "", remarks: { ...(seed||{}) } };
+}
+const Cascade = { bay: null, equipment: [], stage: "monthly", monthly: null, quarterly: null, annual: null, groupId: null };
+
+function openCascadeLogger(bayId) {
+  const bay = findBay(bayId);
+  Cascade.bay = bay;
+  Cascade.equipment = equipmentForBay(bay);
+  Cascade.stage = "monthly";
+  Cascade.monthly = emptyEntry();
+  Cascade.quarterly = null;
+  Cascade.annual = null;
+  Cascade.groupId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+  renderModal();
+}
+function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+const canPrefill = () => State.isAdmin || State.prefillUsers.includes(State.currentUser);
+
+function checklistFormHTML(title, entry) {
+  return `
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:4px">${title}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
+      <label class="fld"><span>Date</span><input class="in mono" id="ce_date" value="${entry.date}"/></label>
+      <label class="fld"><span>Logged by</span><input class="in" id="ce_loggedBy" value="${entry.loggedBy}" placeholder="Name / designation"/></label>
+    </div>
+    <div id="ce_items">
+      ${Cascade.equipment.map((eq) => `
+        <div class="checklist-item">
+          <div style="font-size:12.5px;margin-bottom:6px"><b>${eq.code}</b> — ${eq.label}</div>
+          <div class="row">
+            <input class="in" data-code="${eq.code}" value="${(entry.remarks[eq.code]||"").replace(/"/g,'&quot;')}" placeholder="Remark…"/>
+            ${canPrefill() ? `<button class="btn ghost sm" onclick="prefillOne('${eq.code}')">↻ Prefill</button>` : ""}
+          </div>
+        </div>
+      `).join("")}
+    </div>
+  `;
+}
+function prefillOne(code) {
+  const input = document.querySelector(`input[data-code="${CSS.escape(code)}"]`);
+  if (input) input.value = pickRemark(code);
+}
+function collectEntryFromForm() {
+  const remarks = {};
+  document.querySelectorAll("#ce_items input[data-code]").forEach((inp) => { remarks[inp.dataset.code] = inp.value; });
+  return { date: document.getElementById("ce_date").value, loggedBy: document.getElementById("ce_loggedBy").value, remarks };
+}
+
+function renderModal() {
+  const root = document.getElementById("modalRoot");
+  const bayName = Cascade.bay.name;
+
+  if (Cascade.stage === "monthly") {
+    root.innerHTML = modalWrap(`
+      ${checklistFormHTML(`Monthly Maintenance — ${bayName}`, Cascade.monthly)}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="Cascade.monthly=collectEntryFromForm();Cascade.stage='askQ';renderModal()">Save & continue</button>
+      </div>
+    `);
+  } else if (Cascade.stage === "askQ") {
+    root.innerHTML = modalWrap(`
+      <div style="font-family:var(--display);font-weight:700;font-size:16px">Is Quarterly Maintenance also being covered in this outage?</div>
+      <div style="color:var(--dim);font-size:13px;margin-top:6px">If yes, the quarterly form prefills from what you just entered.</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+        <button class="btn ghost" onclick="finishCascade()">No — save Monthly only</button>
+        <button class="btn" onclick="Cascade.quarterly=emptyEntry(Cascade.monthly.remarks);Cascade.stage='quarterly';renderModal()">Yes — continue to Quarterly</button>
+      </div>
+    `);
+  } else if (Cascade.stage === "quarterly") {
+    root.innerHTML = modalWrap(`
+      ${checklistFormHTML(`Quarterly Maintenance — ${bayName}`, Cascade.quarterly)}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="Cascade.quarterly=collectEntryFromForm();Cascade.stage='askA';renderModal()">Save & continue</button>
+      </div>
+    `);
+  } else if (Cascade.stage === "askA") {
+    root.innerHTML = modalWrap(`
+      <div style="font-family:var(--display);font-weight:700;font-size:16px">Is Annual Maintenance also being covered in this outage?</div>
+      <div style="color:var(--dim);font-size:13px;margin-top:6px">If yes, the annual form prefills from the quarterly entry.</div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
+        <button class="btn ghost" onclick="finishCascade()">No — save & finish</button>
+        <button class="btn" onclick="Cascade.annual=emptyEntry(Cascade.quarterly.remarks);Cascade.stage='annual';renderModal()">Yes — continue to Annual</button>
+      </div>
+    `);
+  } else if (Cascade.stage === "annual") {
+    root.innerHTML = modalWrap(`
+      ${checklistFormHTML(`Annual Maintenance — ${bayName}`, Cascade.annual)}
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
+        <button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="Cascade.annual=collectEntryFromForm();finishCascade()">Save all & finish</button>
+      </div>
+    `);
+  }
+}
+function modalWrap(inner) {
+  return `<div class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal">${inner}</div></div>`;
+}
+async function finishCascade() {
+  const entries = { monthly: Cascade.monthly, quarterly: Cascade.quarterly, annual: Cascade.annual };
+  await apiPost("logMaintenance", { bayId: Cascade.bay.id, groupId: Cascade.groupId, entries, user: State.currentUser });
+  closeModal();
+  renderBayDetail(Cascade.bay.id);
+}
+
+// ---------------------------------------------------------------------------
+// SLD DRAWING SLOT — lightweight freehand editor now; full symbol-based
+// builder (from your index.html) is a follow-up port given its size.
+// ---------------------------------------------------------------------------
+function openSLDEditor(bayId) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:10px">SLD — Bay ${bayId}</div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:10px">
+      Freehand editor for now (draw with mouse/touch, save). Porting your full symbol-based
+      builder from index.html in next pass, seeded from the master SLD crop for this bay.
+    </div>
+    <canvas id="sldCanvas" width="600" height="380" style="background:#0e1a15;border:1px solid var(--border);border-radius:8px;width:100%;touch-action:none;cursor:crosshair"></canvas>
+    <div style="display:flex;justify-content:space-between;margin-top:12px">
+      <button class="btn ghost sm" onclick="clearSLDCanvas()">Clear</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="saveSLDCanvas('${bayId}')">Save drawing</button>
+      </div>
+    </div>
+  `);
+  setupSLDCanvas();
+}
+function setupSLDCanvas() {
+  const canvas = document.getElementById("sldCanvas");
+  const ctx = canvas.getContext("2d");
+  ctx.strokeStyle = "#3FBFA6"; ctx.lineWidth = 2; ctx.lineCap = "round";
+  let drawing = false, last = null;
+  function pos(e) {
+    const r = canvas.getBoundingClientRect();
+    const p = e.touches ? e.touches[0] : e;
+    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
+  }
+  function start(e) { drawing = true; last = pos(e); }
+  function move(e) {
+    if (!drawing) return;
+    const p = pos(e);
+    ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
+    last = p; e.preventDefault();
+  }
+  function end() { drawing = false; }
+  canvas.addEventListener("mousedown", start); canvas.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
+  canvas.addEventListener("touchstart", start); canvas.addEventListener("touchmove", move); canvas.addEventListener("touchend", end);
+}
+function clearSLDCanvas() {
+  const canvas = document.getElementById("sldCanvas");
+  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
+}
+async function saveSLDCanvas(bayId) {
+  const canvas = document.getElementById("sldCanvas");
+  const dataUrl = canvas.toDataURL("image/png");
+  await apiPost("saveSLD", { bayId, drawing: { dataUrl }, user: State.currentUser });
+  closeModal();
+  renderBayDetail(bayId);
+}
+
+// ---------------------------------------------------------------------------
+// ADMIN
+// ---------------------------------------------------------------------------
+function renderAdmin() {
+  app.innerHTML = `
+    <h1 class="page-title">Admin</h1>
+    <div class="page-sub">Control who can use auto-prefill remarks when logging maintenance. The top-bar toggle simulates admin login for now — real auth arrives with backend deployment.</div>
+    ${busbarSVG()}
+    <div class="card" style="max-width:460px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px">Users allowed to use prefill</div>
+      <div id="prefillList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+        ${State.prefillUsers.length===0 ? `<div style="color:var(--dim);font-size:12px">No users added yet.</div>` :
+          State.prefillUsers.map(u => `
+            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:6px 10px">
+              <span style="font-size:12.5px">${u}</span>
+              <button class="btn danger sm" onclick="removePrefillUser('${u}')">remove</button>
+            </div>`).join("")}
+      </div>
+      <div style="display:flex;gap:6px">
+        <input class="in" id="newPrefillUser" placeholder="User name / ID"/>
+        <button class="btn" onclick="addPrefillUser()">Add</button>
+      </div>
+    </div>
+  `;
+}
+async function addPrefillUser() {
+  const input = document.getElementById("newPrefillUser");
+  const v = input.value.trim();
+  if (!v) return;
+  State.prefillUsers.push(v);
+  await apiPost("setPrefillUsers", { users: State.prefillUsers });
+  renderAdmin();
+}
+async function removePrefillUser(u) {
+  State.prefillUsers = State.prefillUsers.filter((x) => x !== u);
+  await apiPost("setPrefillUsers", { users: State.prefillUsers });
+  renderAdmin();
+}
+
+function renderStub(k) {
+  const titles = { gallery: "Photo Gallery", battery: "Battery Set", dg: "DG Set", other: "Other Maintenance" };
+  app.innerHTML = `<h1 class="page-title">${titles[k]}</h1>${busbarSVG()}<div class="card"><div class="empty-note">Coming in a later phase.</div></div>`;
+}
+
+// ---------------------------------------------------------------------------
+// BOOT
+// ---------------------------------------------------------------------------
+document.getElementById("adminSwitch").addEventListener("click", () => { State.isAdmin = !State.isAdmin; render(); });
+
+(async function boot() {
+  await loadAll();
+  render();
+  initWeather();
+})();
+
+  </script>
+</body>
+</html>
