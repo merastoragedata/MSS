@@ -18,6 +18,12 @@ const SHEET_LOG = "MaintenanceLog";
 const SHEET_PREFILL = "PrefillUsers";
 const SHEET_SLD = "SLDDrawings";
 const SHEET_CONFIG = "Config";
+const SHEET_CHECKLIST = "ChecklistState";       // per bay+equipment+category sections/checkpoints
+const SHEET_EQUIPINFO = "EquipmentInfo";        // per bay+equipment info panel (make/sr/etc)
+const SHEET_MU = "MU_Remarks";                  // station-wide feed, bay-level only
+const SHEET_TU = "TU_Remarks";                  // station-wide feed, bay-level only
+const SHEET_EQUIP_MU = "Equipment_MU_Remarks";  // equipment-level ad hoc, NOT mirrored to feed
+const SHEET_EQUIP_TU = "Equipment_TU_Remarks";  // equipment-level ad hoc, NOT mirrored to feed
 
 // ---------------------------------------------------------------------------
 // ONE-TIME SETUP — run this manually once from the Apps Script editor.
@@ -27,10 +33,16 @@ function setupSheets() {
 
   const defs = {
     [SHEET_BAYS]: ["BayID", "Name", "VoltageLevel", "Type", "ICTGroup", "Status", "UpdatedBy", "UpdatedAt"],
-    [SHEET_LOG]: ["ID", "BayID", "Category", "Date", "LoggedBy", "RemarksJSON", "GroupID", "CreatedAt"],
+    [SHEET_LOG]: ["ID", "BayID", "EquipCode", "Category", "Date", "LoggedBy", "RemarksJSON", "MURemark", "TURemark", "GroupID", "CreatedAt"],
     [SHEET_PREFILL]: ["UserName"],
     [SHEET_SLD]: ["BayID", "DrawingJSON", "UpdatedBy", "UpdatedAt"],
     [SHEET_CONFIG]: ["Key", "Value"],
+    [SHEET_CHECKLIST]: ["BayID", "EquipCode", "Category", "SectionsJSON", "UpdatedBy", "UpdatedAt"],
+    [SHEET_EQUIPINFO]: ["BayID", "EquipCode", "InfoJSON", "UpdatedBy", "UpdatedAt"],
+    [SHEET_MU]: ["ID", "BayID", "Category", "Date", "Remark", "LoggedBy", "CreatedAt"],
+    [SHEET_TU]: ["ID", "BayID", "Category", "Date", "Remark", "LoggedBy", "CreatedAt"],
+    [SHEET_EQUIP_MU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "LoggedBy", "CreatedAt"],
+    [SHEET_EQUIP_TU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "LoggedBy", "CreatedAt"],
   };
 
   Object.keys(defs).forEach((name) => {
@@ -107,7 +119,7 @@ function doGet(e) {
         result = { bays: getAllRows(SHEET_BAYS) };
         break;
       case "getMaintenance":
-        result = { records: getMaintenanceForBay(e.parameter.bayId) };
+        result = { records: getMaintenanceForBay(e.parameter.bayId, e.parameter.equipCode) };
         break;
       case "getPrefillUsers":
         result = { users: getAllRows(SHEET_PREFILL).map((r) => r.UserName) };
@@ -117,6 +129,18 @@ function doGet(e) {
         break;
       case "getConfig":
         result = { config: getConfigMap() };
+        break;
+      case "getChecklistState":
+        result = { state: getChecklistState(e.parameter.bayId, e.parameter.equipCode, e.parameter.category) };
+        break;
+      case "getEquipmentInfo":
+        result = { info: getEquipmentInfo(e.parameter.bayId, e.parameter.equipCode) };
+        break;
+      case "getGlobalRemarks":
+        result = { records: getAllRows(e.parameter.kind === "TU" ? SHEET_TU : SHEET_MU) };
+        break;
+      case "getEquipmentRemarks":
+        result = { records: getEquipmentRemarks(e.parameter.kind, e.parameter.bayId, e.parameter.equipCode) };
         break;
       default:
         result = { error: "Unknown action: " + action };
@@ -147,6 +171,19 @@ function doPost(e) {
         break;
       case "saveSLD":
         result = saveSLDForBay(body.bayId, body.drawing, body.user);
+        break;
+      case "saveChecklistState":
+        // body.targets: [{bayId, equipCode}] — same sections applied to every target (scope resolution done client-side)
+        result = saveChecklistStateBulk(body.targets, body.category, body.sections, body.user);
+        break;
+      case "saveEquipmentInfo":
+        result = saveEquipmentInfo(body.bayId, body.equipCode, body.info, body.user);
+        break;
+      case "logEquipmentMaintenance":
+        result = logEquipmentMaintenance(body.bayId, body.equipCode, body.groupId, body.entries, body.user);
+        break;
+      case "addEquipmentRemark":
+        result = addEquipmentRemark(body.kind, body.bayId, body.equipCode, body.date, body.remark, body.user);
         break;
       default:
         result = { error: "Unknown action: " + action };
@@ -200,8 +237,9 @@ function updateBayField(bayId, field, value, user) {
   return { ok: false, error: "Bay not found: " + bayId };
 }
 
-function getMaintenanceForBay(bayId) {
-  const rows = getAllRows(SHEET_LOG).filter((r) => String(r.BayID) === String(bayId));
+function getMaintenanceForBay(bayId, equipCode) {
+  let rows = getAllRows(SHEET_LOG).filter((r) => String(r.BayID) === String(bayId));
+  if (equipCode) rows = rows.filter((r) => String(r.EquipCode) === String(equipCode));
   return rows.map((r) => ({ ...r, Remarks: safeParse(r.RemarksJSON) }));
 }
 
@@ -276,4 +314,118 @@ function safeParse(str) {
   } catch {
     return {};
   }
+}
+
+// ---------------------------------------------------------------------------
+// CHECKLIST STATE (sections/checkpoints) — per bay + equipment + category.
+// Absence of a row means "use the built-in library default" (resolved
+// client-side); this sheet only holds rows once someone has customized them.
+// ---------------------------------------------------------------------------
+function getChecklistState(bayId, equipCode, category) {
+  const rows = getAllRows(SHEET_CHECKLIST).filter(
+    (r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode) && String(r.Category) === String(category)
+  );
+  if (!rows.length) return null;
+  return safeParse(rows[rows.length - 1].SectionsJSON);
+}
+
+// Applies the same section list to every {bayId, equipCode} target — this is
+// how "this bay only" / "selected bays" / "all bays of this type" scope
+// choices are materialized (the app resolves which targets to pass in).
+function saveChecklistStateBulk(targets, category, sections, user) {
+  const sh = getSheet(SHEET_CHECKLIST);
+  const values = sh.getDataRange().getValues();
+  const headers = values[0];
+  const bIdx = headers.indexOf("BayID"), eIdx = headers.indexOf("EquipCode"), cIdx = headers.indexOf("Category");
+  const now = new Date().toISOString();
+  const sectionsJSON = JSON.stringify(sections);
+
+  targets.forEach((t) => {
+    let found = false;
+    for (let r = 1; r < values.length; r++) {
+      if (String(values[r][bIdx]) === String(t.bayId) && String(values[r][eIdx]) === String(t.equipCode) && String(values[r][cIdx]) === String(category)) {
+        sh.getRange(r + 1, headers.indexOf("SectionsJSON") + 1).setValue(sectionsJSON);
+        sh.getRange(r + 1, headers.indexOf("UpdatedBy") + 1).setValue(user || "unknown");
+        sh.getRange(r + 1, headers.indexOf("UpdatedAt") + 1).setValue(now);
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      sh.appendRow([t.bayId, t.equipCode, category, sectionsJSON, user || "unknown", now]);
+    }
+  });
+  return { ok: true, count: targets.length };
+}
+
+// ---------------------------------------------------------------------------
+// EQUIPMENT INFO PANEL (make / sr no / type / rated V / rated A / DOC, or
+// per-phase R/Y/B variants for CT & LA)
+// ---------------------------------------------------------------------------
+function getEquipmentInfo(bayId, equipCode) {
+  const rows = getAllRows(SHEET_EQUIPINFO).filter((r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode));
+  if (!rows.length) return null;
+  return safeParse(rows[rows.length - 1].InfoJSON);
+}
+function saveEquipmentInfo(bayId, equipCode, info, user) {
+  const sh = getSheet(SHEET_EQUIPINFO);
+  const values = sh.getDataRange().getValues();
+  const headers = values[0];
+  const bIdx = headers.indexOf("BayID"), eIdx = headers.indexOf("EquipCode");
+  const now = new Date().toISOString();
+  for (let r = 1; r < values.length; r++) {
+    if (String(values[r][bIdx]) === String(bayId) && String(values[r][eIdx]) === String(equipCode)) {
+      sh.getRange(r + 1, headers.indexOf("InfoJSON") + 1).setValue(JSON.stringify(info));
+      sh.getRange(r + 1, headers.indexOf("UpdatedBy") + 1).setValue(user || "unknown");
+      sh.getRange(r + 1, headers.indexOf("UpdatedAt") + 1).setValue(now);
+      return { ok: true };
+    }
+  }
+  sh.appendRow([bayId, equipCode, JSON.stringify(info), user || "unknown", now]);
+  return { ok: true, created: true };
+}
+
+// ---------------------------------------------------------------------------
+// EQUIPMENT-LEVEL MAINTENANCE LOGGING (cascade M->Q->A, per equipment)
+// Optional MU/TU remarks entered during this flow ALSO get mirrored to the
+// station-wide MU_Remarks / TU_Remarks feed (bay-level only, per your spec —
+// equipment already shows its own MSS history so the feed doesn't need it).
+// ---------------------------------------------------------------------------
+function logEquipmentMaintenance(bayId, equipCode, groupId, entries, user) {
+  const sh = getSheet(SHEET_LOG);
+  const now = new Date().toISOString();
+  const gid = groupId || Utilities.getUuid();
+  const rowsToAdd = [];
+  ["Monthly", "Quarterly", "Annual"].forEach((cat) => {
+    const entry = entries[cat];
+    if (!entry) return;
+    rowsToAdd.push([
+      Utilities.getUuid(), bayId, equipCode, cat, entry.date, entry.loggedBy || user || "unknown",
+      JSON.stringify(entry.remarks || {}), entry.muRemark || "", entry.tuRemark || "", gid, now,
+    ]);
+    if (entry.muRemark) appendGlobalRemark(SHEET_MU, bayId, cat, entry.date, entry.muRemark, entry.loggedBy || user);
+    if (entry.tuRemark) appendGlobalRemark(SHEET_TU, bayId, cat, entry.date, entry.tuRemark, entry.loggedBy || user);
+  });
+  if (rowsToAdd.length) {
+    sh.getRange(sh.getLastRow() + 1, 1, rowsToAdd.length, rowsToAdd[0].length).setValues(rowsToAdd);
+  }
+  return { ok: true, groupId: gid, saved: rowsToAdd.length };
+}
+
+function appendGlobalRemark(sheetName, bayId, category, date, remark, loggedBy) {
+  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, category, date, remark, loggedBy || "unknown", new Date().toISOString()]);
+}
+
+// ---------------------------------------------------------------------------
+// EQUIPMENT-LEVEL AD HOC MU/TU REMARKS (not tied to the M/Q/A checklist
+// cycle; local to the equipment, NOT mirrored to the station-wide feed)
+// ---------------------------------------------------------------------------
+function getEquipmentRemarks(kind, bayId, equipCode) {
+  const sheetName = kind === "TU" ? SHEET_EQUIP_TU : SHEET_EQUIP_MU;
+  return getAllRows(sheetName).filter((r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode));
+}
+function addEquipmentRemark(kind, bayId, equipCode, date, remark, user) {
+  const sheetName = kind === "TU" ? SHEET_EQUIP_TU : SHEET_EQUIP_MU;
+  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, equipCode, date, remark, user || "unknown", new Date().toISOString()]);
+  return { ok: true };
 }
