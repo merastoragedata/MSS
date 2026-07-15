@@ -56,173 +56,333 @@
   </div>
 
   <div id="modalRoot"></div>
+  <script>
+/* =============================================================================
+   CHECKLIST LIBRARY — extracted directly from your legacy CB/CT/89x/CRP/LA
+   Monthly/Quarterly/Annual sheets. Structure: sections (Google-Forms-like,
+   each with a title and checkpoints), per equipment TYPE and CATEGORY.
+   [CONFIRMED] everywhere below — read straight off your workbooks.
 
+   Equipment types that only have Quarterly+Annual (no Monthly): ISOLATOR, LA
+   Equipment types with all three: CB, CT, CRP
+   CVT / WAVETRAP / REACTOR / 33kV components: no legacy proforma was in your
+   sample files — [PLACEHOLDER] generic sections, flagged for you to replace
+   once you send the real sheet (exactly as you said you would).
+   ========================================================================== */
+
+function sec(title, items) {
+  return { id: crypto.randomUUID ? crypto.randomUUID() : String(Math.random()), title, items: items.map((t, i) => ({ id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${i}`), text: t })) };
+}
+
+const CHECKLIST_LIBRARY = {
+  CB: {
+    Monthly: [
+      sec("General", [
+        "Check any Air/Oil leakage from any place (R ph)",
+        "Check any Air/Oil leakage from any place (Y ph)",
+        "Check any Air/Oil leakage from any place (B ph)",
+        "Check the Air/Oil Pressure and SF6 Pressure (R ph)",
+        "Check the Air/Oil Pressure and SF6 Pressure (Y ph)",
+        "Check the Air/Oil Pressure and SF6 Pressure (B ph)",
+        "Check the nitrogen pressure if provided (R ph)",
+        "Check the nitrogen pressure if provided (Y ph)",
+        "Check the nitrogen pressure if provided (B ph)",
+        "Check HV connections by thermovision camera (R ph)",
+        "Check HV connections by thermovision camera (Y ph)",
+        "Check HV connections by thermovision camera (B ph)",
+      ]),
+    ],
+    Quarterly: [
+      sec("PORCELAIN", ["Clean all porcelain thoroughly", "Check for cracks", "Check for Flashover marks"]),
+      sec("OPERATING MECHANISM BOX", [
+        "Check connections for tightness", "Check and clean for auxiliary contacts", "Check for oil/air leak",
+        "Check for SF6 leakages", "Check the SF6 Gas pressure", "Check the air/oil pressure",
+        "Check for auto operation of compressor", "Check cubicle heater",
+      ]),
+      sec("MARSHALLING BOX", [
+        "Clean the connection by CTC/equivalent", "Check connection for tightness", "Check LT plug point",
+        "Clean switch contacts", "Check the contactors", "Check the fuses", "Clean the M.B.",
+        "Check the M.B. Box for verming and proofing",
+      ]),
+      sec("RESISTANCE MEASUREMENT", [
+        "Closing Coil (R ph)", "Closing Coil (Y ph)", "Closing Coil (B ph)",
+        "Tripping Coil - I (R ph)", "Tripping Coil - I (Y ph)", "Tripping Coil - I (B ph)",
+        "Tripping Coil - II (R ph)", "Tripping Coil - II (Y ph)", "Tripping Coil - II (B ph)",
+      ]),
+      sec("LOCAL/REMOTE ELECTRICAL BREAKER OPERATIONS", [
+        "Closing operation", "Tripping operations through TC-I and TC-II", "Trip trial of breaker through protection",
+      ]),
+    ],
+    Annual: [
+      sec("Breaker Timing", ["Closing Time (R/Y/B/Overall)", "Tripping Time (R/Y/B/Overall)", "Check operation of pre-insertion resistor if provided"]),
+      sec("General", [
+        "Check operation of operation counter", "Check pole discrepancy", "Check of interlocks",
+        "Static contact resistance", "Checking of tightness of all terminations in the MB",
+        "Checking of door sealing gaskets, replace if necessary", "General cleaning of MB and repainting of metallic surface if required",
+        "Check functioning of space heater/illumination",
+      ]),
+    ],
+  },
+
+  CT: {
+    Monthly: [
+      sec("General", [
+        "Check oil level from gauge glass (R ph)", "Check oil level from gauge glass (Y ph)", "Check oil level from gauge glass (B ph)",
+        "Check for any crack in insulator (R ph)", "Check for any crack in insulator (Y ph)", "Check for any crack in insulator (B ph)",
+        "Check for any visible oil leakage (R ph)", "Check for any visible oil leakage (Y ph)", "Check for any visible oil leakage (B ph)",
+        "Check for any visible deterioration of primary connections (R ph)", "Check for any visible deterioration of primary connections (Y ph)", "Check for any visible deterioration of primary connections (B ph)",
+        "HV connection/joints checking by thermovision camera (R ph)", "HV connection/joints checking by thermovision camera (Y ph)", "HV connection/joints checking by thermovision camera (B ph)",
+      ]),
+    ],
+    Quarterly: [
+      sec("General", [
+        "Clean thoroughly all parts including porcelain bushing (R/Y/B)",
+        "Check bushing for cracks/chipping; repair chipped spots (R/Y/B)",
+        "Check HV connections and ratio link for tightness (R/Y/B)",
+        "Check secondary terminal connections & junction box for tightness/insulation/healthiness (R/Y/B)",
+        "Check earthing continuity of CT secondary star point (R/Y/B)",
+        "Check earthing of the framework (R/Y/B)",
+        "Check silica gel, replace if provided and necessary (R/Y/B)",
+        "N2 pressure checking if provided (R/Y/B)",
+        "Check Tan-delta point for tightness and proper earthing (R/Y/B)",
+      ]),
+    ],
+    Annual: [
+      sec("Oil & Insulation Tests", [
+        "Test oil for dielectric strength (R/Y/B)", "Test oil for deposits, colour and acidity (R/Y/B)",
+        "Megger windings — primary to tan-delta point (or primary to earth) (R/Y/B)",
+        "Checking tightness of all electrical connections (R/Y/B)", "Measurement of capacitance and tan-delta (R/Y/B)",
+        "Checking of N2 pressure if provided (R/Y/B)", "Checking of bellow expansion if provided (R/Y/B)",
+      ]),
+      sec("Other Tests As & When Required", [
+        "Measurement of CT secondary resistance (R/Y/B)", "Magnetisation characteristic (R/Y/B)", "CT Ratio test (R/Y/B)",
+        "DGA and other test of oil", "Measurement of IR values — primary/secondary/earth (corewise) (R/Y/B)",
+      ]),
+      sec("CT Marshalling Box", [
+        "Checking healthiness of gasket", "Checking space heater prior to monsoon",
+        "Checking all connections including earthing", "Cleaning of marshalling box", "Check the box for verming proofing",
+      ]),
+    ],
+  },
+
+  ISOLATOR: {
+    Quarterly: [
+      sec("INSULATORS", ["Clean all insulators; use solvent (CTC etc.) if stains/deposits won't remove", "Report on condition of insulators if coated with silicon compound"]),
+      sec("SWITCH", [
+        "Check contacts/clips and blades; clean contact surfaces with fine emery paper",
+        "Smear 'no oxide' grease/white vaseline on contact surface, wipe excess",
+        "Lubricate bearings, joints, contact springs", "Clean ground contact clips and blades if provided",
+        "Tighten group connections", "Check adjustment of arc horns on horn gap switch",
+        "Check condition of flexible bonds of connectors / G.O.D. jumpers",
+        "Lubricate bearings, pin joints of inter-phase cranks and couplings",
+        "Check for split pins", "Clean and lubricate interlock keys",
+      ]),
+      sec("AUXILIARY SWITCHES", [
+        "Check and clean auxiliary contacts in isolators; smear with petroleum jelly where provided",
+        "Check that wiring is not loose and has no deteriorated insulation",
+        "Check for correct remote semaphore/lamp indications",
+        "Clean and check operation of the interlocking coil push button",
+        "Check condition of interlocking coil",
+      ]),
+      sec("HAND OPERATED MECHANISM", [
+        "Clean and check the heaters", "Check connections for tightness", "Clean switch contacts",
+        "Check the fuses", "Clean the cubicle",
+      ]),
+      sec("TESTS", [
+        "Close and open several times to make the mechanism free", "Check hand operation of isolators for smoothness",
+        "Check that proper contacts are made", "Check that all phases close together",
+        "Test the mechanical interlocks", "Test the electrical interlocks",
+      ]),
+    ],
+    Annual: [
+      sec("SWITCH", ["Examine contact alignment — blade parallel with box when fully closed"]),
+      sec("OPERATING MECHANISM", ["Tighten all bolts of inter-phase pipe connections", "Clean bearings of rotating bushings/insulators and lubricate with grease"]),
+      sec("MOTOR OPERATED MECHANISM", ["Check operation of motor brakes", "Lubricate gear, shaft, bearings etc.", "Check contacts, contact springs, operating levers and auxiliary contacts"]),
+      sec("TESTS", [
+        "Check contact resistances with AVO/ducter after closing disconnect",
+        "For isolators with spark tips: check tips touch before main contacts close and separate after they open; clean if damaged",
+        "Check ground connections of structures", "Check supporting structures for loose bolts", "Clean rusty parts/points",
+      ]),
+    ],
+  },
+
+  CRP: {
+    Monthly: [
+      sec("General", [
+        "Clean all the panels from outside", "Replace fused bulbs if any", "Check healthy trip circuit lamps",
+        "Check the annunciation and fault indicating lamp by the test push button",
+        "Check the DC tripping voltage available in control & relay panel (measure by AVO)",
+      ]),
+    ],
+    Quarterly: [
+      sec("General", ["Check the semaphore indication", "Check overheating of relays if any", "Check the flags of the relays if any", "Check the space heaters if provided"]),
+    ],
+    Annual: [
+      sec("General", [
+        "Clean with vacuum cleaner; ensure panels are verming proof",
+        "Check all connections for tightness — terminal strips, instruments & switches",
+        "Check electrical connections on terminal board for tightness/deteriorated insulation",
+        "Clean and check all the switches", "Clean and check all the contactors", "Check the semaphore indications",
+        "Polish panel surface with wax polish", "Check for rusting and repaint if necessary",
+        "Get all meters/instruments calibrated",
+        "Get all relays tested by Testing Division — verify correct visual/audible indication on annunciator panel",
+        "Check the earthing of panel", "Check the thermostat for space heaters if provided",
+      ]),
+    ],
+  },
+
+  LA: {
+    Quarterly: [
+      sec("General", ["Clean porcelain of the arrestor", "Check and tighten main and earth connections", "Record surge counter"]),
+    ],
+    Annual: [
+      sec("General", ["Check LA counter", "Clean porcelain of the arrestor", "Check tightness of connections"]),
+    ],
+  },
+
+  // ---- [PLACEHOLDER] — no legacy proforma sample provided yet ----
+  CVT: {
+    Quarterly: [sec("General", ["Clean porcelain thoroughly", "Check for cracks/oil leakage", "Check secondary terminal box connections"])],
+    Annual: [sec("General", ["Measure capacitance and tan-delta", "Check IR value", "Check earthing continuity"])],
+  },
+  WAVETRAP: {
+    Quarterly: [sec("General", ["Check for physical damage/corrosion", "Check tightness of connections"])],
+    Annual: [sec("General", ["Check tuning device", "Check earthing of base"])],
+  },
+  REACTOR: {
+    Monthly: [sec("General", ["Check oil level", "Check for oil leakage", "Check silica gel condition", "Check for abnormal noise/vibration"])],
+    Quarterly: [sec("General", ["Check winding temperature indicator", "Check Buchholz relay", "Check all connections for tightness"])],
+    Annual: [sec("General", ["Oil DGA test", "Megger test of winding", "Check earthing continuity", "Check bushings for cracks"])],
+  },
+  GENERIC33: {
+    Quarterly: [sec("General", ["Clean thoroughly", "Check connections for tightness", "Check for physical damage"])],
+    Annual: [sec("General", ["Megger test", "Check earthing continuity", "Check for corrosion/repaint if required"])],
+  },
+};
+
+function equipTypeFromCode(code) {
+  const c = code.toUpperCase();
+  if (c.includes("CVT")) return "CVT";
+  if (c.includes("WT")) return "WAVETRAP";
+  if (c.includes("B/R")) return "REACTOR";
+  if (c.includes("CT")) return "CT";
+  if (c.includes("52") || c.endsWith("-CB")) return "CB";
+  if (c.includes("89") || c.includes("HGF")) return "ISOLATOR";
+  if (c.includes("LA")) return "LA";
+  if (c.includes("CRP")) return "CRP";
+  if (c.includes("MCT") || c.includes("MPT")) return "GENERIC33";
+  return "GENERIC33";
+}
+
+// deep-clones the library's default sections for a given type/category so
+// each bay's equipment gets its OWN editable copy (adding a section on one
+// bay's isolator never mutates another bay's checklist unless the user
+// explicitly chooses to propagate it — see propagateSectionChange()).
+function defaultSectionsFor(equipType, category) {
+  const lib = CHECKLIST_LIBRARY[equipType] || CHECKLIST_LIBRARY.GENERIC33;
+  const sections = lib[category] || [];
+  return JSON.parse(JSON.stringify(sections)).map((s) => ({ ...s, id: crypto.randomUUID(), items: s.items.map((it) => ({ ...it, id: crypto.randomUUID() })) }));
+}
+
+function applicableCategories(equipType) {
+  return Object.keys(CHECKLIST_LIBRARY[equipType] || CHECKLIST_LIBRARY.GENERIC33);
+}
+
+  </script>
   <script>
 /**
- * EQUIPMENT NOMENCLATURE — derived from SLD_400_kV_Karjat_SS.pdf
- *
- * Confirmed pattern (from Bay 402, verified against you):
- *   <bay-number> - <equipment-code>
- *   e.g. 402-89A (isolator), 402-89AE (its earth switch), 402-52 (CB, also
- *   tagged 402-CB), 402-CT (current transformer), 402-89B / 402-89BE
- *   (isolator + earth switch on the far side of the CB)
- *
- * CONFIDENCE LEVELS — please skim once and correct anything wrong; the
- * portal's admin edit screens let you fix any of this later without a
- * redeploy, so nothing here is load-bearing/permanent:
- *   [CONFIRMED]  — read directly off the SLD at 400 DPI, unambiguous
- *   [PATTERN]    — same 89A/89B/52/CT/LA/CVT/WT template applied to a bay
- *                  of the same type elsewhere on the 400 kV yard
- *   [EXTENDED]   — 220 kV / 33 kV equivalents inferred by extending the
- *                  same "bay-code" convention; the 33 kV Station Transformer
- *                  bays (31xxx/32xxx tags) ARE confirmed from the legend,
- *                  everything else on 220 kV/33 kV is EXTENDED and most
- *                  likely to need your correction
+ * EQUIPMENT NOMENCLATURE — derived from SLD_400_kV_Karjat_SS.pdf (see prior
+ * notes for [CONFIRMED]/[PATTERN]/[EXTENDED] confidence levels; unchanged
+ * from before). Every bay also gets a synthetic "<bay>-CRP" entry — every
+ * bay has a Control & Relay Panel even though it isn't drawn on the SLD.
+ * `perPhase: true` means the equipment info panel shows separate
+ * Make/Sr.No/Type/DOC columns for R/Y/B (matches your legacy CT & LA sheets).
  */
 
-// ---- 400 kV bay-type equipment templates --------------------------------
-const TPL_400_LINE = (b) => [ // [CONFIRMED] pattern from bays 404/407/410/413
-  { code: `${b}-LA`, label: "Lightning Arrester" },
-  { code: `${b}-CVT`, label: "Capacitive Voltage Transformer" },
-  { code: `${b}-WT`, label: "Wave Trap (Y & B phase)" },
-  { code: `${b}-89L`, label: "Line Isolator" },
-  { code: `${b}-89LE1`, label: "Line Earth Switch 1" },
-  { code: `${b}-89LE2`, label: "Line Earth Switch 2" },
-  { code: `${b}-89A`, label: "Isolator A (Bus side)" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
-  { code: `${b}-89B`, label: "Isolator B (Diameter side)" },
-];
+function eq(code, label, perPhase = false) { return { code, label, perPhase }; }
 
-const TPL_400_TIE = (b) => [ // [CONFIRMED] — this is the exact Bay 402 you verified
-  { code: `${b}-89A`, label: "Isolator A" },
-  { code: `${b}-89AE`, label: "Earth Switch A" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
-  { code: `${b}-89B`, label: "Isolator B" },
-  { code: `${b}-89BE`, label: "Earth Switch B" },
+const TPL_400_LINE = (b) => [
+  eq(`${b}-LA`, "Lightning Arrester", true),
+  eq(`${b}-CVT`, "Capacitive Voltage Transformer", true),
+  eq(`${b}-WT`, "Wave Trap (Y & B phase)"),
+  eq(`${b}-89L`, "Line Isolator"),
+  eq(`${b}-89A`, "Isolator A (Bus side)"),
+  eq(`${b}-52`, "Circuit Breaker"),
+  eq(`${b}-CT`, "Current Transformer", true),
+  eq(`${b}-89B`, "Isolator B (Diameter side)"),
+  eq(`${b}-CRP`, "Control & Relay Panel"),
 ];
-
-const TPL_400_REACTOR = (b) => [ // [CONFIRMED] read from Bay 401
-  { code: `${b}-LA1`, label: "Lightning Arrester 1" },
-  { code: `${b}-LA2`, label: "Lightning Arrester 2" },
-  { code: `${b}-B/R`, label: "125 MVAr Bus Reactor" },
-  { code: `${b}-89R`, label: "Reactor Isolator" },
-  { code: `${b}-89RE1`, label: "Reactor Earth Switch 1" },
-  { code: `${b}-89RE2`, label: "Reactor Earth Switch 2" },
-  { code: `${b}-89A`, label: "Isolator A" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
-  { code: `${b}-89B`, label: "Isolator B" },
+const TPL_400_TIE = (b) => [
+  eq(`${b}-89A`, "Isolator A"),
+  eq(`${b}-52`, "Circuit Breaker"),
+  eq(`${b}-CT`, "Current Transformer", true),
+  eq(`${b}-89B`, "Isolator B"),
+  eq(`${b}-CRP`, "Control & Relay Panel"),
 ];
-
-const TPL_400_ICT_HV = (b) => [ // [CONFIRMED] read from bays 400/403/406/409
-  { code: `${b}-CVT`, label: "CVT (Y phase)" },
-  { code: `${b}-89B`, label: "Isolator B (ICT side)" },
-  { code: `${b}-CT`, label: "Current Transformer" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-89A`, label: "Isolator A (Bus side)" },
+const TPL_400_REACTOR = (b) => [
+  eq(`${b}-LA1`, "Lightning Arrester 1"),
+  eq(`${b}-LA2`, "Lightning Arrester 2"),
+  eq(`${b}-B/R`, "125 MVAr Bus Reactor"),
+  eq(`${b}-89R`, "Reactor Isolator"),
+  eq(`${b}-89A`, "Isolator A"),
+  eq(`${b}-52`, "Circuit Breaker"),
+  eq(`${b}-CT`, "Current Transformer", true),
+  eq(`${b}-89B`, "Isolator B"),
+  eq(`${b}-CRP`, "Control & Relay Panel"),
 ];
-
-const TPL_400_FUTURE = (b) => [ // [PATTERN] — dashed provision shown on SLD for bays 412/415
-  { code: `${b}-89A`, label: "Isolator A (provisioned)" },
-  { code: `${b}-89AE`, label: "Earth Switch A (provisioned)" },
-  { code: `${b}-52`, label: "Circuit Breaker (provisioned)" },
-  { code: `${b}-CT`, label: "Current Transformer (provisioned)" },
-  { code: `${b}-89B`, label: "Isolator B (provisioned)" },
-  { code: `${b}-89BE`, label: "Earth Switch B (provisioned)" },
+const TPL_400_ICT_HV = (b) => [
+  eq(`${b}-CVT`, "CVT (Y phase)", true),
+  eq(`${b}-89B`, "Isolator B (ICT side)"),
+  eq(`${b}-CT`, "Current Transformer", true),
+  eq(`${b}-52`, "Circuit Breaker"),
+  eq(`${b}-89A`, "Isolator A (Bus side)"),
+  eq(`${b}-CRP`, "Control & Relay Panel"),
 ];
-
-// ---- 220 kV bay-type equipment templates (Double Main + Transfer Bus) ---
-// [EXTENDED] — same bay-code convention, please correct exact isolator
-// tags once you can check the 220 kV portion of the SLD closely.
+const TPL_400_FUTURE = (b) => [
+  eq(`${b}-89A`, "Isolator A (provisioned)"),
+  eq(`${b}-52`, "Circuit Breaker (provisioned)"),
+  eq(`${b}-CT`, "Current Transformer (provisioned)", true),
+  eq(`${b}-89B`, "Isolator B (provisioned)"),
+];
 const TPL_220_LINE = (b) => [
-  { code: `${b}-LA`, label: "Lightning Arrester" },
-  { code: `${b}-CVT`, label: "Capacitive Voltage Transformer" },
-  { code: `${b}-89L`, label: "Line Isolator" },
-  { code: `${b}-89LE`, label: "Line Earth Switch" },
-  { code: `${b}-89-1`, label: "Isolator — Main Bus I" },
-  { code: `${b}-89-2`, label: "Isolator — Main Bus II" },
-  { code: `${b}-89TR`, label: "Isolator — Transfer Bus" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
+  eq(`${b}-LA`, "Lightning Arrester", true),
+  eq(`${b}-CVT`, "Capacitive Voltage Transformer", true),
+  eq(`${b}-89L`, "Line Isolator"),
+  eq(`${b}-89-1`, "Isolator — Main Bus I"),
+  eq(`${b}-89-2`, "Isolator — Main Bus II"),
+  eq(`${b}-89TR`, "Isolator — Transfer Bus"),
+  eq(`${b}-52`, "Circuit Breaker"),
+  eq(`${b}-CT`, "Current Transformer", true),
+  eq(`${b}-CRP`, "Control & Relay Panel"),
 ];
-
 const TPL_220_ICT_IV = (b) => [
-  { code: `${b}-89A`, label: "Isolator A (ICT side)" },
-  { code: `${b}-89-1`, label: "Isolator — Main Bus I" },
-  { code: `${b}-89-2`, label: "Isolator — Main Bus II" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
+  eq(`${b}-89A`, "Isolator A (ICT side)"),
+  eq(`${b}-89-1`, "Isolator — Main Bus I"),
+  eq(`${b}-89-2`, "Isolator — Main Bus II"),
+  eq(`${b}-52`, "Circuit Breaker"),
+  eq(`${b}-CT`, "Current Transformer", true),
+  eq(`${b}-CRP`, "Control & Relay Panel"),
 ];
+const TPL_220_BC = (b) => [eq(`${b}-89-1`, "Isolator — Main Bus I"), eq(`${b}-89-2`, "Isolator — Main Bus II"), eq(`${b}-52`, "Circuit Breaker"), eq(`${b}-CT`, "Current Transformer", true), eq(`${b}-CRP`, "Control & Relay Panel")];
+const TPL_220_TBC = (b) => [eq(`${b}-89-1`, "Isolator — Main Bus"), eq(`${b}-89TR`, "Isolator — Transfer Bus"), eq(`${b}-52`, "Circuit Breaker"), eq(`${b}-CT`, "Current Transformer", true), eq(`${b}-CRP`, "Control & Relay Panel")];
+const TPL_33_STNTFR = (b, prefix) => [eq(`${prefix}HGF`, "HG Fuse"), eq(`${prefix}89T1`, "Isolator T1"), eq(`${prefix}89T2`, "Isolator T2"), eq(`${prefix}MCT1`, "Metering CT"), eq(`${prefix}MPT1`, "Metering PT"), eq(`${prefix}LA`, "Lightning Arrester")];
+const TPL_33_LINE = (b) => [eq(`${b}-LA`, "Lightning Arrester"), eq(`${b}-89L`, "Line Isolator"), eq(`${b}-52`, "Circuit Breaker"), eq(`${b}-CT`, "Current Transformer")];
+const TPL_33_BS = (b) => [eq(`${b}-89-1`, "Isolator — Section 1"), eq(`${b}-89-2`, "Isolator — Section 2"), eq(`${b}-52`, "Circuit Breaker")];
 
-const TPL_220_BC = (b) => [
-  { code: `${b}-89-1`, label: "Isolator — Main Bus I" },
-  { code: `${b}-89-2`, label: "Isolator — Main Bus II" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
-];
-
-const TPL_220_TBC = (b) => [
-  { code: `${b}-89-1`, label: "Isolator — Main Bus" },
-  { code: `${b}-89TR`, label: "Isolator — Transfer Bus" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
-];
-
-// ---- 33 kV yard -----------------------------------------------------------
-// Station Transformer bays [CONFIRMED] — read directly off the 33 kV legend
-// inset (STN TRANFO-01 uses the "31" prefix, STN TRANFO-02 the "32" prefix).
-const TPL_33_STNTFR = (b, prefix) => [
-  { code: `${prefix}HGF`, label: "HG Fuse" },
-  { code: `${prefix}89T1`, label: "Isolator T1" },
-  { code: `${prefix}89T2`, label: "Isolator T2" },
-  { code: `${prefix}MCT1`, label: "Metering CT" },
-  { code: `${prefix}MPT1`, label: "Metering PT" },
-  { code: `${prefix}LA`, label: "Lightning Arrester" },
-];
-
-// [EXTENDED] — 33 kV line bay & bus sectionaliser bay; no direct legend read.
-const TPL_33_LINE = (b) => [
-  { code: `${b}-LA`, label: "Lightning Arrester" },
-  { code: `${b}-89L`, label: "Line Isolator" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-  { code: `${b}-CT`, label: "Current Transformer" },
-];
-
-const TPL_33_BS = (b) => [
-  { code: `${b}-89-1`, label: "Isolator — Section 1" },
-  { code: `${b}-89-2`, label: "Isolator — Section 2" },
-  { code: `${b}-52`, label: "Circuit Breaker" },
-];
-
-// ---------------------------------------------------------------------------
 function equipmentForBay(bay) {
   switch (bay.type) {
-    case "Line":
-      return bay.voltage === "220" ? TPL_220_LINE(bay.id) : TPL_400_LINE(bay.id);
-    case "Tie":
-      return TPL_400_TIE(bay.id);
-    case "Reactor":
-      return TPL_400_REACTOR(bay.id);
-    case "ICT-HV":
-      return TPL_400_ICT_HV(bay.id);
-    case "ICT-IV":
-      return TPL_220_ICT_IV(bay.id);
-    case "Future":
-      return TPL_400_FUTURE(bay.id);
-    case "BC":
-      return TPL_220_BC(bay.id);
-    case "TBC":
-      return TPL_220_TBC(bay.id);
-    case "StnTfr33":
-      return TPL_33_STNTFR(bay.id, bay.id === "33-T1" ? "31" : "32");
-    case "Line33":
-      return TPL_33_LINE(bay.id);
-    case "BS33":
-      return TPL_33_BS(bay.id);
-    default:
-      return [];
+    case "Line": return bay.voltage === "220" ? TPL_220_LINE(bay.id) : TPL_400_LINE(bay.id);
+    case "Tie": return TPL_400_TIE(bay.id);
+    case "Reactor": return TPL_400_REACTOR(bay.id);
+    case "ICT-HV": return TPL_400_ICT_HV(bay.id);
+    case "ICT-IV": return TPL_220_ICT_IV(bay.id);
+    case "Future": return TPL_400_FUTURE(bay.id);
+    case "BC": return TPL_220_BC(bay.id);
+    case "TBC": return TPL_220_TBC(bay.id);
+    case "StnTfr33": return TPL_33_STNTFR(bay.id, bay.id === "33-T1" ? "31" : "32");
+    case "Line33": return TPL_33_LINE(bay.id);
+    case "BS33": return TPL_33_BS(bay.id);
+    default: return [];
   }
 }
 
@@ -361,26 +521,23 @@ function loopWeather() {
 /* =============================================================================
    KARJAT 400/220/33 kV SUBSTATION PORTAL — APP LOGIC
    Vanilla JS SPA. Talks to Google Apps Script (code.gs) backed by a Google
-   Sheet. Until API_URL is set it runs in DEMO MODE against localStorage so
-   you (and I) can fully click through it before deployment.
+   Sheet. Until API_URL is set it runs in DEMO MODE against localStorage.
    ========================================================================== */
 
 // ---------------------------------------------------------------------------
-// 1) CONFIG — paste your Apps Script /exec URL here once deployed.
+// 1) CONFIG
 // ---------------------------------------------------------------------------
 const CONFIG = {
-  API_URL: "", // <-- e.g. "https://script.google.com/macros/s/AKfycb.../exec"
+  API_URL: "", // <-- paste your Apps Script /exec URL here once deployed
   SUBSTATION_NAME: "KARJAT 400/220/33 kV S/S",
   SS_CODE: "J966",
-  // Karjat, Raigad district, Maharashtra — used for live weather
   LAT: 18.9107,
   LON: 73.3260,
 };
-
 const DEMO_MODE = !CONFIG.API_URL;
 
 // ---------------------------------------------------------------------------
-// 2) BAY MASTER (fallback/seed data — mirrors the Sheet's Bays tab)
+// 2) BAY MASTER
 // ---------------------------------------------------------------------------
 const BAY_MASTER = [
   { id: "400", name: "400/220 kV 167 MVA SPARE ICT", voltage: "400", type: "ICT-HV", ictGroup: "ICT-SPARE", status: "Active" },
@@ -433,16 +590,16 @@ const REMARK_POOLS = {
   pressure: ["Pressure found OK / as per norms.", "Gas/oil pressure in order.", "Pressure verified within limits.", "Checked — normal pressure."],
   meggering: ["Insulation resistance within limits.", "IR value healthy — logged in register.", "Megger test OK.", "IR test satisfactory."],
 };
-function poolFor(code) {
-  const c = code.toLowerCase();
-  if (c.includes("52") || c.includes("cb")) return "tightness";
-  if (c.includes("ct") || c.includes("pt")) return "meggering";
-  if (c.includes("la") || c.includes("cvt")) return "leakage";
-  if (c.includes("89")) return "pressure";
+function poolForText(text) {
+  const t = text.toLowerCase();
+  if (t.includes("clean")) return "cleaning";
+  if (t.includes("tight") || t.includes("connection")) return "tightness";
+  if (t.includes("leak") || t.includes("pressure")) return "pressure";
+  if (t.includes("megger") || t.includes("ir ") || t.includes("insulation")) return "meggering";
   return "general";
 }
-function pickRemark(code) {
-  const arr = REMARK_POOLS[poolFor(code)];
+function pickRemark(checkpointText) {
+  const arr = REMARK_POOLS[poolForText(checkpointText)];
   return arr[Math.floor(Math.random() * arr.length)];
 }
 
@@ -450,13 +607,14 @@ function pickRemark(code) {
 // 3) API CLIENT (real or demo/localStorage)
 // ---------------------------------------------------------------------------
 const DemoDB = {
-  key: "karjat_portal_demo_v1",
+  key: "karjat_portal_demo_v2",
   read() {
-    try { return JSON.parse(localStorage.getItem(this.key)) || { bays: {}, records: {}, prefillUsers: [], sld: {} }; }
-    catch { return { bays: {}, records: {}, prefillUsers: [], sld: {} }; }
+    try { return JSON.parse(localStorage.getItem(this.key)) || { bays: {}, records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {} }; }
+    catch { return { bays: {}, records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {} }; }
   },
   write(db) { localStorage.setItem(this.key, JSON.stringify(db)); },
 };
+function uid() { return crypto.randomUUID ? crypto.randomUUID() : String(Date.now() + Math.random()); }
 
 async function apiGet(action, params = {}) {
   if (DEMO_MODE) return demoGet(action, params);
@@ -468,7 +626,7 @@ async function apiPost(action, body = {}) {
   if (DEMO_MODE) return demoPost(action, body);
   const res = await fetch(CONFIG.API_URL, {
     method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" }, // avoids CORS preflight on Apps Script
+    headers: { "Content-Type": "text/plain;charset=utf-8" },
     body: JSON.stringify({ action, ...body }),
   });
   return res.json();
@@ -476,36 +634,51 @@ async function apiPost(action, body = {}) {
 
 function demoGet(action, params) {
   const db = DemoDB.read();
-  if (action === "getBays") {
-    const bays = BAY_MASTER.map((b) => ({ ...b, ...(db.bays[b.id] || {}) }));
-    return { bays };
-  }
-  if (action === "getMaintenance") return { records: db.records[params.bayId] || [] };
+  if (action === "getBays") return { bays: BAY_MASTER.map((b) => ({ ...b, ...(db.bays[b.id] || {}) })) };
+  if (action === "getMaintenance") return { records: db.records.filter((r) => r.BayID === params.bayId && (!params.equipCode || r.EquipCode === params.equipCode)) };
   if (action === "getPrefillUsers") return { users: db.prefillUsers };
   if (action === "getSLD") return { drawing: db.sld[params.bayId] || null };
+  if (action === "getChecklistState") return { state: db.checklist[`${params.bayId}::${params.equipCode}::${params.category}`] || null };
+  if (action === "getEquipmentInfo") return { info: db.equipInfo[`${params.bayId}::${params.equipCode}`] || null };
+  if (action === "getGlobalRemarks") return { records: params.kind === "TU" ? db.tuFeed : db.muFeed };
+  if (action === "getEquipmentRemarks") {
+    const store = params.kind === "TU" ? db.equipTu : db.equipMu;
+    return { records: store[`${params.bayId}::${params.equipCode}`] || [] };
+  }
   return {};
 }
 function demoPost(action, body) {
   const db = DemoDB.read();
-  if (action === "updateBayStatus") {
-    db.bays[body.bayId] = { ...(db.bays[body.bayId] || {}), status: body.status };
-  } else if (action === "renameBay") {
-    db.bays[body.bayId] = { ...(db.bays[body.bayId] || {}), name: body.name };
-  } else if (action === "logMaintenance") {
-    const gid = body.groupId || crypto.randomUUID();
-    db.records[body.bayId] = db.records[body.bayId] || [];
-    db.records[body.bayId].push({ ...body.entries, GroupID: gid, CreatedAt: new Date().toISOString() });
-  } else if (action === "setPrefillUsers") {
-    db.prefillUsers = body.users;
-  } else if (action === "saveSLD") {
-    db.sld[body.bayId] = body.drawing;
+  if (action === "updateBayStatus") db.bays[body.bayId] = { ...(db.bays[body.bayId] || {}), status: body.status };
+  else if (action === "renameBay") db.bays[body.bayId] = { ...(db.bays[body.bayId] || {}), name: body.name };
+  else if (action === "logMaintenance") db.records.push({ ...body.entries, BayID: body.bayId, GroupID: body.groupId, CreatedAt: new Date().toISOString() });
+  else if (action === "setPrefillUsers") db.prefillUsers = body.users;
+  else if (action === "saveSLD") db.sld[body.bayId] = body.drawing;
+  else if (action === "saveChecklistState") {
+    (body.targets || []).forEach((t) => { db.checklist[`${t.bayId}::${t.equipCode}::${body.category}`] = body.sections; });
+  } else if (action === "saveEquipmentInfo") {
+    db.equipInfo[`${body.bayId}::${body.equipCode}`] = body.info;
+  } else if (action === "logEquipmentMaintenance") {
+    ["Monthly", "Quarterly", "Annual"].forEach((cat) => {
+      const entry = body.entries[cat];
+      if (!entry) return;
+      const rec = { ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: cat, Date: entry.date, LoggedBy: entry.loggedBy || body.user, Remarks: entry.remarks, GroupID: body.groupId, CreatedAt: new Date().toISOString() };
+      db.records.push(rec);
+      if (entry.muRemark) db.muFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, Remark: entry.muRemark, LoggedBy: entry.loggedBy || body.user });
+      if (entry.tuRemark) db.tuFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, Remark: entry.tuRemark, LoggedBy: entry.loggedBy || body.user });
+    });
+  } else if (action === "addEquipmentRemark") {
+    const store = body.kind === "TU" ? db.equipTu : db.equipMu;
+    const key = `${body.bayId}::${body.equipCode}`;
+    store[key] = store[key] || [];
+    store[key].unshift({ ID: uid(), Date: body.date, Remark: body.remark, LoggedBy: body.user });
   }
   DemoDB.write(db);
   return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
-// 4) DATE / DUE-DATE HELPERS
+// 4) DATE / DUE HELPERS
 // ---------------------------------------------------------------------------
 function currentFY(d = new Date()) {
   const y = d.getFullYear(), m = d.getMonth() + 1;
@@ -513,28 +686,20 @@ function currentFY(d = new Date()) {
 }
 function addMonths(date, n) { const d = new Date(date); d.setMonth(d.getMonth() + n); return d; }
 function daysBetween(a, b) { return Math.round((b - a) / 86400000); }
-
 const CYCLE_MONTHS = { Monthly: 1, Quarterly: 3, Annual: 12 };
-
-// returns { lastDate, nextDue, tone: 'ok'|'warn'|'overdue', daysLeft }
 function dueStatus(category, records) {
   const list = records.filter((r) => r.Category === category).sort((a, b) => new Date(b.Date) - new Date(a.Date));
   const last = list[0];
-  if (!last) return { lastDate: null, nextDue: null, tone: "overdue", label: "Never logged" };
+  if (!last) return { lastDate: null, nextDue: null, tone: "overdue" };
   const nextDue = addMonths(last.Date, CYCLE_MONTHS[category]);
   const daysLeft = daysBetween(new Date(), nextDue);
   let tone;
-  if (category === "Monthly") {
-    tone = daysLeft < 0 ? "overdue" : daysLeft <= 14 ? "warn" : "ok";
-  } else {
-    tone = daysLeft < 0 ? "overdue" : daysLeft <= 60 ? "warn" : "ok";
-  }
-  return { lastDate: last.Date, nextDue: nextDue.toISOString().slice(0, 10), tone, daysLeft };
+  if (category === "Monthly") tone = daysLeft < 0 ? "overdue" : daysLeft <= 14 ? "warn" : "ok";
+  else tone = daysLeft < 0 ? "overdue" : daysLeft <= 60 ? "warn" : "ok";
+  return { lastDate: last.Date, nextDue: nextDue.toISOString().slice(0, 10), tone };
 }
 function duePillHTML(status) {
-  const label = status.lastDate
-    ? `Last: ${status.lastDate} · Next due: ${status.nextDue}`
-    : "Never logged — due now";
+  const label = status.lastDate ? `Last: ${status.lastDate} · Next due: ${status.nextDue}` : "Never logged — due now";
   return `<span class="due-pill ${status.tone}"><span class="dot"></span>${label}</span>`;
 }
 
@@ -547,22 +712,22 @@ const State = {
   isAdmin: true,
   prefillUsers: [],
   currentUser: "Guest User",
+  _equipTab: {},   // bayId -> selected equipCode
+  _catTab: {},     // equipCode -> selected category
 };
-
 async function loadAll() {
   const { bays } = await apiGet("getBays");
   State.bays = bays;
   const { users } = await apiGet("getPrefillUsers");
   State.prefillUsers = users || [];
 }
-
 function findBay(id) { return State.bays.find((b) => b.id === id); }
+const canPrefill = () => State.isAdmin || State.prefillUsers.includes(State.currentUser);
 
 // ---------------------------------------------------------------------------
-// 6) RENDER — router
+// 6) ROUTER
 // ---------------------------------------------------------------------------
 const app = document.getElementById("appRoot");
-
 function setView(v) { State.view = v; render(); window.scrollTo({ top: 0, behavior: "smooth" }); }
 
 async function render() {
@@ -576,14 +741,16 @@ async function render() {
   if (v.k === "ictDetail") return renderICTDetail(v.id);
   if (v.k === "bay") return renderBayDetail(v.id);
   if (v.k === "admin") return renderAdmin();
-  if (v.k === "gallery" || v.k === "battery" || v.k === "dg" || v.k === "other") return renderStub(v.k);
+  if (v.k === "mu") return renderGlobalRemarks("MU");
+  if (v.k === "tu") return renderGlobalRemarks("TU");
+  if (["gallery", "battery", "dg", "other"].includes(v.k)) return renderStub(v.k);
   return renderHome();
 }
 
 function renderTopbar() {
   const nav = [
-    ["home", "Home"], ["400", "400 kV Bays"], ["220", "220 kV Bays"],
-    ["ict", "ICTs"], ["33", "33 kV Yard"], ["gallery", "Photo Gallery"], ["admin", "Admin"],
+    ["home", "Home"], ["400", "400 kV Bays"], ["220", "220 kV Bays"], ["ict", "ICTs"], ["33", "33 kV Yard"],
+    ["mu", "MU Remarks"], ["tu", "TU Remarks"], ["gallery", "Photo Gallery"], ["admin", "Admin"],
   ];
   document.getElementById("mainnav").innerHTML = nav.map(([k, label]) =>
     `<button class="${State.view.k === k ? "active" : ""}" onclick="setView({k:'${k}'})">${label}</button>`
@@ -600,14 +767,6 @@ function busbarSVG() {
     ${[40,120,200,280,360].map(x => `<rect x="${x-3}" y="2" width="6" height="6" fill="var(--bg)" stroke="var(--amber)" stroke-width="1"/>`).join("")}
   </svg>`;
 }
-
-function statusBadgeClass(status) {
-  if (status === "Active") return "active";
-  if (status === "Commissioning Soon") return "soon";
-  if (status === "Future") return "future";
-  return "dim";
-}
-
 function statusEditor(bay) {
   return `<select class="status-select" onclick="event.stopPropagation()" onchange="updateStatus('${bay.id}', this.value)">
     ${STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === bay.status ? "selected" : ""}>${s}</option>`).join("")}
@@ -622,16 +781,14 @@ async function updateStatus(bayId, status) {
 // ---------------------------------------------------------------------------
 // HOME
 // ---------------------------------------------------------------------------
-function countLogged(ids) {
-  // demo/local heuristic count — real count comes per-bay when opened
-  return null;
-}
 function renderHome() {
   const cats = [
     { k: "400", title: "400 kV Lines & Bays", sub: "1½ CB scheme", count: State.bays.filter(b=>b.voltage==="400").length },
     { k: "220", title: "220 kV Lines & Bays", sub: "Double Main + Transfer", count: State.bays.filter(b=>b.voltage==="220").length },
     { k: "ict", title: "ICTs", sub: "501/167 MVA, phase-wise", count: ICT_GROUPS.length },
     { k: "33", title: "33 kV Yard", sub: "Line, BS, Stn. Transformers", count: State.bays.filter(b=>b.voltage==="33").length },
+    { k: "mu", title: "Maintenance Unit Remarks", sub: "Station-wide MU feed", count: "—" },
+    { k: "tu", title: "Testing Unit Remarks", sub: "Station-wide TU feed", count: "—" },
     { k: "battery", title: "Battery Set", sub: "Charger & bank", count: 1 },
     { k: "dg", title: "DG Set", sub: "Proforma pending", count: 1 },
     { k: "other", title: "Other Maintenance", sub: "Civil / misc.", count: "—" },
@@ -666,7 +823,6 @@ function renderBayGrid(voltage, title) {
   const bays = State.bays.filter((b) => b.voltage === voltage);
   const groups = {};
   bays.forEach((b) => { (groups[b.type] = groups[b.type] || []).push(b); });
-
   app.innerHTML = `
     <h1 class="page-title">${title}</h1>
     ${busbarSVG()}
@@ -690,7 +846,7 @@ function renderBayGrid(voltage, title) {
 }
 
 // ---------------------------------------------------------------------------
-// ICT LIST / DETAIL
+// ICT LIST / DETAIL (unchanged structurally)
 // ---------------------------------------------------------------------------
 function renderICTList() {
   app.innerHTML = `
@@ -702,15 +858,12 @@ function renderICTList() {
         <div class="card clickable" onclick="setView({k:'ictDetail',id:'${g.id}'})">
           <div style="font-family:var(--mono);font-size:11px;color:var(--copper)">${g.id}</div>
           <div style="font-size:14px;font-weight:600;margin-top:8px">${g.label}</div>
-          <div style="font-size:11.5px;color:var(--dim);margin-top:4px">
-            HV: Bay ${g.hv} ${g.iv ? `· IV: Bay ${g.iv}` : "· No IV pairing (spare)"}
-          </div>
+          <div style="font-size:11.5px;color:var(--dim);margin-top:4px">HV: Bay ${g.hv} ${g.iv ? `· IV: Bay ${g.iv}` : "· No IV pairing (spare)"}</div>
         </div>
       `).join("")}
     </div>
   `;
 }
-
 function renderICTDetail(groupId) {
   const g = ICT_GROUPS.find((x) => x.id === groupId);
   if (!g) { app.innerHTML = `<div class="empty-note">ICT group not found</div>`; return; }
@@ -719,98 +872,62 @@ function renderICTDetail(groupId) {
   app.innerHTML = `
     <button class="btn ghost sm" onclick="setView({k:'ict'})">← All ICTs</button>
     <h1 class="page-title" style="margin-top:10px">${g.label}</h1>
-    <div class="page-sub">HV Bay ${g.hv} ${g.iv ? `· IV Bay ${g.iv}` : ""} — "RRS Region" label kept exactly as specified; flag if it should read differently.</div>
+    <div class="page-sub">HV Bay ${g.hv} ${g.iv ? `· IV Bay ${g.iv}` : ""} — "RRS Region" label kept exactly as specified.</div>
     ${busbarSVG()}
-    <div class="tabs">
-      ${tabs.map(([k,label]) => `<button class="tab ${active===k?"active":""}" onclick="State._ictTab='${k}';render()">${label}</button>`).join("")}
-    </div>
-    <div class="card">
-      <div class="empty-note">${tabs.find(t=>t[0]===active)[1]} maintenance log — equipment-specific checklist lands here next (bushings, OLTC, oil, Buchholz, WTI/OTI per phase, etc.)</div>
-    </div>
+    <div class="tabs">${tabs.map(([k,label]) => `<button class="tab ${active===k?"active":""}" onclick="State._ictTab='${k}';render()">${label}</button>`).join("")}</div>
+    <div class="card"><div class="empty-note">${tabs.find(t=>t[0]===active)[1]} maintenance log — equipment-specific checklist lands here next.</div></div>
   `;
 }
 
 // ---------------------------------------------------------------------------
-// BAY DETAIL
+// BAY DETAIL — bay info panel + equipment tabs
 // ---------------------------------------------------------------------------
+function bayInfoFieldsHTML(bay) {
+  const fields = [["Voltage", `${bay.voltage} kV`], ["Type", bay.type], ["ICT Group", bay.ictGroup || "—"]];
+  return fields.map(([k, v]) => `<div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">${k}</div><div style="font-size:13px;margin-top:2px">${v}</div></div>`).join("");
+}
+
 async function renderBayDetail(bayId) {
   const bay = findBay(bayId);
   if (!bay) { app.innerHTML = `<div class="empty-note">Bay not found</div>`; return; }
-  const { records } = await apiGet("getMaintenance", { bayId });
-  State._records = records;
-  const tab = State._bayTab || "Monthly";
-  const sldRes = await apiGet("getSLD", { bayId });
-  State._sld = sldRes.drawing;
-
   const equipment = equipmentForBay(bay);
+  const activeEquip = State._equipTab[bayId] || equipment[0]?.code;
+  State._currentBay = bay;
+  State._currentEquipList = equipment;
 
   app.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
       <div>
         <div style="font-family:var(--mono);font-size:12px;color:var(--copper)">BAY ${bay.id}</div>
         <div style="display:flex;align-items:center;gap:10px;margin-top:4px">
-          <h1 class="page-title" style="margin:0" id="bayNameDisplay">${bay.name}</h1>
+          <h1 class="page-title" style="margin:0">${bay.name}</h1>
           <button class="btn ghost sm" onclick="editBayName('${bay.id}')">edit name</button>
         </div>
-        <div style="margin-top:8px">${statusEditor(bay)}</div>
       </div>
-      <div style="display:flex;gap:8px">
-        <button class="btn ghost" onclick="openSLDEditor('${bay.id}')">🗺 Draw / View SLD</button>
-        <button class="btn" onclick="openCascadeLogger('${bay.id}')">+ Log Maintenance Entry</button>
-      </div>
+      <button class="btn ghost" onclick="openSLDEditor('${bay.id}')">🗺 Draw / View SLD</button>
+    </div>
+
+    <!-- BAY INFORMATION PANEL -->
+    <div class="card" style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;align-items:center">
+      ${bayInfoFieldsHTML(bay)}
+      <div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Status</div><div style="margin-top:4px">${statusEditor(bay)}</div></div>
     </div>
 
     ${busbarSVG()}
 
-    <div class="tabs">
-      ${["Monthly","Quarterly","Annual"].map((t) => `<button class="tab ${tab===t?"active":""}" onclick="State._bayTab='${t}';render()">${t}</button>`).join("")}
+    <div class="type-label">Equipment on this bay (${equipment.length}) — tap to open</div>
+    <div class="tabs" id="equipTabs">
+      ${equipment.map(e => `<button class="tab ${activeEquip===e.code?"active":""}" onclick="selectEquip('${bay.id}','${e.code}')">${e.code}</button>`).join("")}
     </div>
 
-    <div style="margin-bottom:16px">${duePillHTML(dueStatus(tab, records))}</div>
-
-    <div class="type-label">Equipment covered on this bay (${equipment.length})</div>
-    <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:20px">
-      ${equipment.map(e => `<span class="badge dim" title="${e.label}">${e.code}</span>`).join("")}
-    </div>
-
-    <div id="historyList"></div>
-
-    <div class="section-block" style="margin-top:28px">
-      <div class="type-label">SLD — this bay</div>
-      <div class="sld-frame" id="sldFrame">
-        ${State._sld ? `<img src="${State._sld.dataUrl}" alt="Bay SLD"/>` : `<div class="sld-empty">No drawing saved yet. Click "Draw / View SLD" above — it opens seeded from the master station SLD for this bay.</div>`}
-      </div>
-    </div>
+    <div id="equipPanel"></div>
   `;
-  renderHistory(records, tab);
+  if (activeEquip) await renderEquipPanel(bay, equipment.find(e => e.code === activeEquip));
 }
 
-function renderHistory(records, category) {
-  const fyOnly = !!State._fyOnly;
-  let list = records.filter((r) => r.Category === category).sort((a,b) => new Date(b.Date) - new Date(a.Date));
-  if (fyOnly) list = list.filter((r) => currentFY(new Date(r.Date)) === currentFY());
-  const html = `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-      <div style="font-family:var(--mono);font-size:11.5px;color:var(--dim)">${list.length} entr${list.length===1?"y":"ies"} · reverse chronological</div>
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--dim);cursor:pointer">
-        <input type="checkbox" ${fyOnly?"checked":""} onchange="State._fyOnly=this.checked;render()"/> Current FY only (${currentFY()})
-      </label>
-    </div>
-    ${list.length === 0 ? `<div class="empty-note">No entries yet.</div>` : list.map((r) => {
-      const remarks = typeof r.Remarks === "object" ? r.Remarks : (r.RemarksJSON ? JSON.parse(r.RemarksJSON) : (r.remarks || {}));
-      return `
-      <div class="hist-row">
-        <div class="hist-top">
-          <span class="hist-date">${r.Date}</span>
-          <span style="color:var(--dim)">${r.LoggedBy || r.loggedBy || "—"}</span>
-        </div>
-        <div class="hist-remarks">
-          ${Object.entries(remarks).filter(([,v]) => v).map(([k,v]) => `<div class="hist-remark"><b>${k}:</b> ${v}</div>`).join("")}
-        </div>
-      </div>`;
-    }).join("")}
-  `;
-  document.getElementById("historyList").innerHTML = html;
+function selectEquip(bayId, code) {
+  State._equipTab[bayId] = code;
+  renderEquipPanel(findBay(bayId), State._currentEquipList.find(e => e.code === code));
 }
 
 async function editBayName(bayId) {
@@ -824,127 +941,404 @@ async function editBayName(bayId) {
 }
 
 // ---------------------------------------------------------------------------
-// CASCADE LOGGER: Monthly -> ask Quarterly -> ask Annual
+// EQUIPMENT PANEL — info panel + M/Q/A tabs + sectioned checklist + MU/TU
 // ---------------------------------------------------------------------------
-function emptyEntry(seed) {
-  return { date: new Date().toISOString().slice(0,10), loggedBy: "", remarks: { ...(seed||{}) } };
-}
-const Cascade = { bay: null, equipment: [], stage: "monthly", monthly: null, quarterly: null, annual: null, groupId: null };
+async function renderEquipPanel(bay, equipItem) {
+  if (!equipItem) { document.getElementById("equipPanel").innerHTML = `<div class="empty-note">No equipment defined.</div>`; return; }
+  const code = equipItem.code;
+  const equipType = equipTypeFromCode(code);
+  const categories = applicableCategories(equipType);
+  const cat = State._catTab[code] || categories[0];
 
-function openCascadeLogger(bayId) {
-  const bay = findBay(bayId);
-  Cascade.bay = bay;
-  Cascade.equipment = equipmentForBay(bay);
-  Cascade.stage = "monthly";
-  Cascade.monthly = emptyEntry();
-  Cascade.quarterly = null;
-  Cascade.annual = null;
-  Cascade.groupId = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
-  renderModal();
-}
-function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
-const canPrefill = () => State.isAdmin || State.prefillUsers.includes(State.currentUser);
+  const { info } = await apiGet("getEquipmentInfo", { bayId: bay.id, equipCode: code });
+  const maintRes = await apiGet("getMaintenance", { bayId: bay.id, equipCode: code });
+  // filter client-side too, defensively (demo mode may return bay-wide records)
+  const equipRecords = (maintRes.records || []).filter((r) => !r.EquipCode || r.EquipCode === code);
 
-function checklistFormHTML(title, entry) {
-  return `
-    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:4px">${title}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px">
-      <label class="fld"><span>Date</span><input class="in mono" id="ce_date" value="${entry.date}"/></label>
-      <label class="fld"><span>Logged by</span><input class="in" id="ce_loggedBy" value="${entry.loggedBy}" placeholder="Name / designation"/></label>
+  let stateSections = await apiGet("getChecklistState", { bayId: bay.id, equipCode: code, category: cat });
+  let sections = stateSections.state || defaultSectionsFor(equipType, cat);
+  State._currentSections = sections;
+  State._currentEquip = { bay, equipItem, equipType, cat };
+
+  const muRes = await apiGet("getEquipmentRemarks", { kind: "MU", bayId: bay.id, equipCode: code });
+  const tuRes = await apiGet("getEquipmentRemarks", { kind: "TU", bayId: bay.id, equipCode: code });
+
+  document.getElementById("equipPanel").innerHTML = `
+    <div class="card" style="margin-bottom:16px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-family:var(--display);font-weight:700;font-size:15px">${code} — ${equipItem.label}</div>
+        <button class="btn ghost sm" onclick="editEquipInfo('${bay.id}','${code}', ${equipItem.perPhase})">edit info</button>
+      </div>
+      <div id="equipInfoDisplay">${renderEquipInfoDisplay(info, equipItem.perPhase)}</div>
     </div>
-    <div id="ce_items">
-      ${Cascade.equipment.map((eq) => `
-        <div class="checklist-item">
-          <div style="font-size:12.5px;margin-bottom:6px"><b>${eq.code}</b> — ${eq.label}</div>
-          <div class="row">
-            <input class="in" data-code="${eq.code}" value="${(entry.remarks[eq.code]||"").replace(/"/g,'&quot;')}" placeholder="Remark…"/>
-            ${canPrefill() ? `<button class="btn ghost sm" onclick="prefillOne('${eq.code}')">↻ Prefill</button>` : ""}
-          </div>
+
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+      <div class="tabs" style="margin-bottom:0">
+        ${categories.map(c => `<button class="tab ${cat===c?"active":""}" onclick="switchCategory('${c}')">${c}</button>`).join("")}
+      </div>
+      <button class="btn" onclick="openCascadeLogger('${bay.id}','${code}')">+ Log Maintenance Entry</button>
+    </div>
+    <div style="margin:14px 0">${duePillHTML(dueStatus(cat, equipRecords))}</div>
+
+    <div class="type-label" style="display:flex;justify-content:space-between;align-items:center">
+      <span>${cat} Checklist</span>
+      <button class="btn ghost sm" onclick="addSection()">+ Add Section</button>
+    </div>
+    <div id="sectionsRoot">${renderSections(sections)}</div>
+
+    <div class="section-block" style="margin-top:26px">
+      <div class="type-label">Recent ${cat} entries</div>
+      <div id="equipHistory">${renderEquipHistory(equipRecords, cat)}</div>
+    </div>
+
+    <div class="section-block" style="margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:20px">
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="type-label" style="margin:0">Maintenance Unit Remarks</div>
+          <button class="btn ghost sm" onclick="addEquipRemarkPrompt('MU','${bay.id}','${code}')">+ Add</button>
         </div>
-      `).join("")}
+        <div id="muList">${renderRemarkList(muRes.records || [])}</div>
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+          <div class="type-label" style="margin:0">Testing Unit Remarks</div>
+          <button class="btn ghost sm" onclick="addEquipRemarkPrompt('TU','${bay.id}','${code}')">+ Add</button>
+        </div>
+        <div id="tuList">${renderRemarkList(tuRes.records || [])}</div>
+      </div>
     </div>
   `;
 }
-function prefillOne(code) {
-  const input = document.querySelector(`input[data-code="${CSS.escape(code)}"]`);
-  if (input) input.value = pickRemark(code);
-}
-function collectEntryFromForm() {
-  const remarks = {};
-  document.querySelectorAll("#ce_items input[data-code]").forEach((inp) => { remarks[inp.dataset.code] = inp.value; });
-  return { date: document.getElementById("ce_date").value, loggedBy: document.getElementById("ce_loggedBy").value, remarks };
-}
 
-function renderModal() {
-  const root = document.getElementById("modalRoot");
-  const bayName = Cascade.bay.name;
-
-  if (Cascade.stage === "monthly") {
-    root.innerHTML = modalWrap(`
-      ${checklistFormHTML(`Monthly Maintenance — ${bayName}`, Cascade.monthly)}
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
-        <button class="btn ghost" onclick="closeModal()">Cancel</button>
-        <button class="btn" onclick="Cascade.monthly=collectEntryFromForm();Cascade.stage='askQ';renderModal()">Save & continue</button>
-      </div>
-    `);
-  } else if (Cascade.stage === "askQ") {
-    root.innerHTML = modalWrap(`
-      <div style="font-family:var(--display);font-weight:700;font-size:16px">Is Quarterly Maintenance also being covered in this outage?</div>
-      <div style="color:var(--dim);font-size:13px;margin-top:6px">If yes, the quarterly form prefills from what you just entered.</div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
-        <button class="btn ghost" onclick="finishCascade()">No — save Monthly only</button>
-        <button class="btn" onclick="Cascade.quarterly=emptyEntry(Cascade.monthly.remarks);Cascade.stage='quarterly';renderModal()">Yes — continue to Quarterly</button>
-      </div>
-    `);
-  } else if (Cascade.stage === "quarterly") {
-    root.innerHTML = modalWrap(`
-      ${checklistFormHTML(`Quarterly Maintenance — ${bayName}`, Cascade.quarterly)}
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
-        <button class="btn ghost" onclick="closeModal()">Cancel</button>
-        <button class="btn" onclick="Cascade.quarterly=collectEntryFromForm();Cascade.stage='askA';renderModal()">Save & continue</button>
-      </div>
-    `);
-  } else if (Cascade.stage === "askA") {
-    root.innerHTML = modalWrap(`
-      <div style="font-family:var(--display);font-weight:700;font-size:16px">Is Annual Maintenance also being covered in this outage?</div>
-      <div style="color:var(--dim);font-size:13px;margin-top:6px">If yes, the annual form prefills from the quarterly entry.</div>
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:20px">
-        <button class="btn ghost" onclick="finishCascade()">No — save & finish</button>
-        <button class="btn" onclick="Cascade.annual=emptyEntry(Cascade.quarterly.remarks);Cascade.stage='annual';renderModal()">Yes — continue to Annual</button>
-      </div>
-    `);
-  } else if (Cascade.stage === "annual") {
-    root.innerHTML = modalWrap(`
-      ${checklistFormHTML(`Annual Maintenance — ${bayName}`, Cascade.annual)}
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:16px">
-        <button class="btn ghost" onclick="closeModal()">Cancel</button>
-        <button class="btn" onclick="Cascade.annual=collectEntryFromForm();finishCascade()">Save all & finish</button>
-      </div>
-    `);
+function renderEquipInfoDisplay(info, perPhase) {
+  if (perPhase) {
+    const phases = ["R", "Y", "B"];
+    const d = info || {};
+    return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
+      ${phases.map(p => `
+        <div style="border:1px solid var(--border);border-radius:8px;padding:8px">
+          <div style="font-family:var(--mono);font-size:11px;color:var(--copper);margin-bottom:4px">${p} phase</div>
+          <div style="font-size:11.5px;color:var(--dim)">Make: <span style="color:var(--text)">${(d[p]&&d[p].make)||"—"}</span></div>
+          <div style="font-size:11.5px;color:var(--dim)">Sr.No: <span style="color:var(--text)">${(d[p]&&d[p].srNo)||"—"}</span></div>
+          <div style="font-size:11.5px;color:var(--dim)">DOC: <span style="color:var(--text)">${(d[p]&&d[p].doc)||"—"}</span></div>
+        </div>
+      `).join("")}
+    </div>`;
   }
+  const d = info || {};
+  const rows = [["Make", d.make], ["Sr. No.", d.srNo], ["Type", d.type], ["Rated Voltage", d.ratedVoltage], ["Rated Amps", d.ratedAmps], ["DOC", d.doc]];
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
+    ${rows.map(([k,v]) => `<div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase">${k}</div><div style="font-size:12.5px;margin-top:2px">${v||"—"}</div></div>`).join("")}
+  </div>`;
 }
-function modalWrap(inner) {
-  return `<div class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal">${inner}</div></div>`;
+
+async function editEquipInfo(bayId, code, perPhase) {
+  const { info } = await apiGet("getEquipmentInfo", { bayId, equipCode: code });
+  let newInfo;
+  if (perPhase) {
+    newInfo = {};
+    for (const p of ["R", "Y", "B"]) {
+      const make = prompt(`${p} phase — Make:`, (info && info[p] && info[p].make) || "") || "";
+      const srNo = prompt(`${p} phase — Sr. No.:`, (info && info[p] && info[p].srNo) || "") || "";
+      const doc = prompt(`${p} phase — DOC:`, (info && info[p] && info[p].doc) || "") || "";
+      newInfo[p] = { make, srNo, doc };
+    }
+  } else {
+    newInfo = {
+      make: prompt("Make:", (info && info.make) || "") || "",
+      srNo: prompt("Sr. No.:", (info && info.srNo) || "") || "",
+      type: prompt("Type:", (info && info.type) || "") || "",
+      ratedVoltage: prompt("Rated Voltage:", (info && info.ratedVoltage) || "") || "",
+      ratedAmps: prompt("Rated Amps:", (info && info.ratedAmps) || "") || "",
+      doc: prompt("DOC:", (info && info.doc) || "") || "",
+    };
+  }
+  await apiPost("saveEquipmentInfo", { bayId, equipCode: code, info: newInfo, user: State.currentUser });
+  renderEquipPanel(findBay(bayId), State._currentEquipList.find(e => e.code === code));
 }
-async function finishCascade() {
-  const entries = { monthly: Cascade.monthly, quarterly: Cascade.quarterly, annual: Cascade.annual };
-  await apiPost("logMaintenance", { bayId: Cascade.bay.id, groupId: Cascade.groupId, entries, user: State.currentUser });
-  closeModal();
-  renderBayDetail(Cascade.bay.id);
+
+function switchCategory(cat) {
+  State._catTab[State._currentEquip.equipItem.code] = cat;
+  renderEquipPanel(State._currentEquip.bay, State._currentEquip.equipItem);
 }
 
 // ---------------------------------------------------------------------------
-// SLD DRAWING SLOT — lightweight freehand editor now; full symbol-based
-// builder (from your index.html) is a follow-up port given its size.
+// SECTIONS / CHECKPOINTS — render, drag-reorder, add, remarks
+// ---------------------------------------------------------------------------
+let dragCtx = null;
+
+function renderSections(sections) {
+  return sections.map((s, si) => `
+    <div class="card" style="margin-bottom:12px" draggable="true"
+         ondragstart="dragCtx={type:'section',index:${si}}"
+         ondragover="event.preventDefault()"
+         ondrop="onDropSection(${si})">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:grab">
+        <div style="font-family:var(--display);font-weight:700;font-size:13.5px">⠿ ${s.title}</div>
+        <button class="btn ghost sm" onclick="addCheckpoint(${si})">+ Add checkpoint</button>
+      </div>
+      <div>
+        ${s.items.map((it, ii) => `
+          <div class="checklist-item" draggable="true"
+               ondragstart="event.stopPropagation();dragCtx={type:'item',sectionIndex:${si},index:${ii}}"
+               ondragover="event.preventDefault()"
+               ondrop="event.stopPropagation();onDropItem(${si},${ii})">
+            <div style="font-size:12.5px;margin-bottom:6px;cursor:grab">⠿ ${it.text}</div>
+            <div class="row">
+              <textarea class="in" rows="1" data-checkpoint="${it.id}" placeholder="Remark…" style="resize:vertical"></textarea>
+              ${canPrefill() ? `<button class="btn ghost sm" onclick="prefillCheckpoint('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
+            </div>
+          </div>
+        `).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+function onDropSection(targetIndex) {
+  if (!dragCtx || dragCtx.type !== "section") return;
+  const sections = State._currentSections;
+  const [moved] = sections.splice(dragCtx.index, 1);
+  sections.splice(targetIndex, 0, moved);
+  dragCtx = null;
+  document.getElementById("sectionsRoot").innerHTML = renderSections(sections);
+}
+function onDropItem(sectionIndex, targetIndex) {
+  if (!dragCtx || dragCtx.type !== "item") return;
+  const sections = State._currentSections;
+  const items = sections[dragCtx.sectionIndex].items;
+  const [moved] = items.splice(dragCtx.index, 1);
+  sections[sectionIndex].items.splice(targetIndex, 0, moved);
+  dragCtx = null;
+  document.getElementById("sectionsRoot").innerHTML = renderSections(sections);
+}
+
+function prefillCheckpoint(checkpointId, text) {
+  const el = document.querySelector(`textarea[data-checkpoint="${CSS.escape(checkpointId)}"]`);
+  if (el) el.value = pickRemark(text);
+}
+
+function addSection() {
+  const title = prompt("New section title:");
+  if (!title) return;
+  const newSection = { id: uid(), title, items: [] };
+  State._currentSections.push(newSection);
+  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
+}
+function addCheckpoint(sectionIndex) {
+  const text = prompt("New checkpoint text:");
+  if (!text) return;
+  State._currentSections[sectionIndex].items.push({ id: uid(), text });
+  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
+}
+
+// Scope popup: this bay only / selected bays / all bays of same equipment type
+function promptScopeAndSave(afterLocalRender) {
+  afterLocalRender();
+  const root = document.getElementById("modalRoot");
+  const { bay, equipItem, equipType, cat } = State._currentEquip;
+  const sameTypeBays = State.bays.filter((b) => equipmentForBay(b).some((e) => equipTypeFromCode(e.code) === equipType));
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:6px">Apply this change to…</div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:14px">New section/checkpoint on <b>${equipItem.code}</b> (${equipType}, ${cat}). Choose scope:</div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn" onclick="applyScope('this')">This bay only (${bay.id})</button>
+      <button class="btn ghost" onclick="showBaySelector()">Select specific bays…</button>
+      <button class="btn ghost" onclick="applyScope('all')">All bays with ${equipType} equipment (${sameTypeBays.length} bays)</button>
+    </div>
+    <div id="baySelectorRoot" style="margin-top:14px"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px">
+      <button class="btn ghost sm" onclick="closeModal()">Cancel (keep local only)</button>
+    </div>
+  `);
+}
+function showBaySelector() {
+  const { equipType } = State._currentEquip;
+  const sameTypeBays = State.bays.filter((b) => equipmentForBay(b).some((e) => equipTypeFromCode(e.code) === equipType));
+  document.getElementById("baySelectorRoot").innerHTML = `
+    <div style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px">
+      ${sameTypeBays.map((b) => `
+        <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:4px 0">
+          <input type="checkbox" class="bay-select-cb" value="${b.id}"/> ${b.id} — ${b.name}
+        </label>
+      `).join("")}
+    </div>
+    <button class="btn sm" style="margin-top:10px" onclick="applyScope('selected')">Apply to checked bays</button>
+  `;
+}
+function applyScope(mode) {
+  const { bay, equipItem, equipType, cat } = State._currentEquip;
+  let targets = [];
+  if (mode === "this") {
+    targets = [{ bayId: bay.id, equipCode: equipItem.code }];
+  } else if (mode === "all") {
+    State.bays.forEach((b) => equipmentForBay(b).forEach((e) => { if (equipTypeFromCode(e.code) === equipType) targets.push({ bayId: b.id, equipCode: e.code }); }));
+  } else if (mode === "selected") {
+    const ids = Array.from(document.querySelectorAll(".bay-select-cb:checked")).map((cb) => cb.value);
+    ids.forEach((bid) => {
+      const b = findBay(bid);
+      equipmentForBay(b).forEach((e) => { if (equipTypeFromCode(e.code) === equipType) targets.push({ bayId: b.id, equipCode: e.code }); });
+    });
+  }
+  apiPost("saveChecklistState", { targets, category: cat, sections: State._currentSections, user: State.currentUser }).then(() => {
+    closeModal();
+  });
+}
+
+function renderEquipHistory(records, category) {
+  const list = records.filter((r) => r.Category === category).sort((a,b) => new Date(b.Date) - new Date(a.Date));
+  if (!list.length) return `<div class="empty-note">No entries yet.</div>`;
+  return list.map((r) => {
+    const remarks = r.Remarks || (r.RemarksJSON ? JSON.parse(r.RemarksJSON) : {});
+    return `<div class="hist-row">
+      <div class="hist-top"><span class="hist-date">${r.Date}</span><span style="color:var(--dim)">${r.LoggedBy || "—"}</span></div>
+      <div class="hist-remarks">${Object.entries(remarks).filter(([,v])=>v).map(([k,v]) => `<div class="hist-remark"><b>${k}:</b> ${v}</div>`).join("")}</div>
+    </div>`;
+  }).join("");
+}
+function renderRemarkList(records) {
+  const list = [...records].sort((a,b) => new Date(b.Date) - new Date(a.Date));
+  if (!list.length) return `<div class="empty-note">No remarks yet.</div>`;
+  return list.map((r) => `<div class="hist-row"><div class="hist-top"><span class="hist-date">${r.Date}</span><span style="color:var(--dim)">${r.LoggedBy||"—"}</span></div><div style="font-size:12.5px;margin-top:6px">${r.Remark}</div></div>`).join("");
+}
+async function addEquipRemarkPrompt(kind, bayId, equipCode) {
+  const remark = prompt(`${kind} remark:`);
+  if (!remark) return;
+  const date = new Date().toISOString().slice(0,10);
+  await apiPost("addEquipmentRemark", { kind, bayId, equipCode, date, remark, user: State.currentUser });
+  renderEquipPanel(findBay(bayId), State._currentEquipList.find(e => e.code === equipCode));
+}
+
+// ---------------------------------------------------------------------------
+// CASCADE LOGGER — per equipment, categories filtered to what's applicable
+// ---------------------------------------------------------------------------
+function emptyEntry(seed) { return { date: new Date().toISOString().slice(0,10), loggedBy: "", remarks: { ...(seed||{}) }, muRemark: "", tuRemark: "" }; }
+const Cascade = { bay: null, equipCode: null, sections: null, cats: [], idx: 0, stageEntries: {}, groupId: null };
+
+function openCascadeLogger(bayId, equipCode) {
+  const bay = findBay(bayId);
+  const equipType = equipTypeFromCode(equipCode);
+  Cascade.bay = bay;
+  Cascade.equipCode = equipCode;
+  Cascade.cats = applicableCategories(equipType); // e.g. ["Quarterly","Annual"] or ["Monthly","Quarterly","Annual"]
+  Cascade.idx = 0;
+  Cascade.stageEntries = {};
+  Cascade.groupId = uid();
+  renderCascadeStage();
+}
+async function renderCascadeStage() {
+  const cat = Cascade.cats[Cascade.idx];
+  const equipType = equipTypeFromCode(Cascade.equipCode);
+  const stateRes = await apiGet("getChecklistState", { bayId: Cascade.bay.id, equipCode: Cascade.equipCode, category: cat });
+  const sections = stateRes.state || defaultSectionsFor(equipType, cat);
+  const seed = Cascade.idx > 0 ? Cascade.stageEntries[Cascade.cats[Cascade.idx - 1]].remarks : {};
+  const entry = emptyEntry(seed);
+  Cascade.stageEntries[cat] = entry;
+
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:4px">${cat} Maintenance — ${Cascade.equipCode}</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 14px">
+      <label class="fld"><span>Date</span><input class="in mono" id="ce_date" value="${entry.date}"/></label>
+      <label class="fld"><span>Logged by</span><input class="in" id="ce_loggedBy" placeholder="Name / designation"/></label>
+    </div>
+    <div id="ce_sections">
+      ${sections.map((s) => `
+        <div style="margin-bottom:10px">
+          <div style="font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">${s.title}</div>
+          ${s.items.map((it) => `
+            <div class="checklist-item">
+              <div style="font-size:12.5px;margin-bottom:6px">${it.text}</div>
+              <div class="row">
+                <textarea class="in" rows="1" data-cp="${it.id}" placeholder="Remark…"></textarea>
+                ${canPrefill() ? `<button class="btn ghost sm" onclick="prefillCascadeCP('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
+              </div>
+            </div>
+          `).join("")}
+        </div>
+      `).join("")}
+    </div>
+    <label class="fld"><span>Maintenance Unit remarks (optional — punched to station MU feed)</span><textarea class="in" id="ce_mu" rows="2"></textarea></label>
+    <label class="fld"><span>Testing Unit remarks (optional — punched to station TU feed)</span><textarea class="in" id="ce_tu" rows="2"></textarea></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="advanceCascade()">${Cascade.idx < Cascade.cats.length - 1 ? "Save & continue" : "Save all & finish"}</button>
+    </div>
+  `);
+}
+function prefillCascadeCP(id, text) {
+  const el = document.querySelector(`textarea[data-cp="${CSS.escape(id)}"]`);
+  if (el) el.value = pickRemark(text);
+}
+function collectCascadeForm() {
+  const remarks = {};
+  document.querySelectorAll("#ce_sections textarea[data-cp]").forEach((t) => { remarks[t.dataset.cp] = t.value; });
+  return {
+    date: document.getElementById("ce_date").value,
+    loggedBy: document.getElementById("ce_loggedBy").value,
+    remarks,
+    muRemark: document.getElementById("ce_mu").value,
+    tuRemark: document.getElementById("ce_tu").value,
+  };
+}
+async function advanceCascade() {
+  const cat = Cascade.cats[Cascade.idx];
+  Cascade.stageEntries[cat] = collectCascadeForm();
+  if (Cascade.idx < Cascade.cats.length - 1) {
+    if (Cascade.cats.length > 1) {
+      const proceed = confirm(`Also cover ${Cascade.cats[Cascade.idx + 1]} maintenance in this outage?`);
+      if (!proceed) return finishCascade();
+    }
+    Cascade.idx++;
+    renderCascadeStage();
+  } else {
+    finishCascade();
+  }
+}
+async function finishCascade() {
+  const entries = {};
+  Cascade.cats.forEach((c) => { if (Cascade.stageEntries[c]) entries[c.charAt(0).toUpperCase() + c.slice(1)] = Cascade.stageEntries[c]; });
+  // normalize keys to Monthly/Quarterly/Annual exactly
+  const norm = {};
+  ["Monthly", "Quarterly", "Annual"].forEach((c) => { if (entries[c]) norm[c] = entries[c]; });
+  await apiPost("logEquipmentMaintenance", { bayId: Cascade.bay.id, equipCode: Cascade.equipCode, groupId: Cascade.groupId, entries: norm, user: State.currentUser });
+  closeModal();
+  renderEquipPanel(Cascade.bay, State._currentEquipList.find(e => e.code === Cascade.equipCode));
+}
+
+function modalWrap(inner) { return `<div class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal">${inner}</div></div>`; }
+function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+
+// ---------------------------------------------------------------------------
+// GLOBAL MU / TU REMARK PAGES (station-wide feed, bay-level only)
+// ---------------------------------------------------------------------------
+async function renderGlobalRemarks(kind) {
+  const { records } = await apiGet("getGlobalRemarks", { kind });
+  const list = (records || []).slice().sort((a,b) => new Date(b.Date) - new Date(a.Date));
+  app.innerHTML = `
+    <h1 class="page-title">${kind === "MU" ? "Maintenance Unit Remarks" : "Testing Unit Remarks"}</h1>
+    <div class="page-sub">Station-wide feed — auto-punched from bay-level Monthly/Quarterly/Annual logging when a ${kind} remark is entered. Equipment-level ad hoc ${kind} notes live on each equipment's own tab and aren't duplicated here.</div>
+    ${busbarSVG()}
+    ${list.length === 0 ? `<div class="empty-note">No ${kind} remarks logged yet.</div>` : list.map((r) => `
+      <div class="hist-row">
+        <div class="hist-top">
+          <span class="hist-date">${r.Date} · Bay ${r.BayID} · ${r.Category}</span>
+          <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
+        </div>
+        <div style="font-size:12.5px;margin-top:6px">${r.Remark}</div>
+      </div>
+    `).join("")}
+  `;
+}
+
+// ---------------------------------------------------------------------------
+// SLD DRAWING SLOT (unchanged)
 // ---------------------------------------------------------------------------
 function openSLDEditor(bayId) {
   const root = document.getElementById("modalRoot");
   root.innerHTML = modalWrap(`
     <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:10px">SLD — Bay ${bayId}</div>
-    <div style="color:var(--dim);font-size:12.5px;margin-bottom:10px">
-      Freehand editor for now (draw with mouse/touch, save). Porting your full symbol-based
-      builder from index.html in next pass, seeded from the master SLD crop for this bay.
-    </div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:10px">Freehand editor for now — full symbol-based builder port is a follow-up task.</div>
     <canvas id="sldCanvas" width="600" height="380" style="background:#0e1a15;border:1px solid var(--border);border-radius:8px;width:100%;touch-action:none;cursor:crosshair"></canvas>
     <div style="display:flex;justify-content:space-between;margin-top:12px">
       <button class="btn ghost sm" onclick="clearSLDCanvas()">Clear</button>
@@ -961,30 +1355,17 @@ function setupSLDCanvas() {
   const ctx = canvas.getContext("2d");
   ctx.strokeStyle = "#3FBFA6"; ctx.lineWidth = 2; ctx.lineCap = "round";
   let drawing = false, last = null;
-  function pos(e) {
-    const r = canvas.getBoundingClientRect();
-    const p = e.touches ? e.touches[0] : e;
-    return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) };
-  }
+  function pos(e) { const r = canvas.getBoundingClientRect(); const p = e.touches ? e.touches[0] : e; return { x: (p.clientX - r.left) * (canvas.width / r.width), y: (p.clientY - r.top) * (canvas.height / r.height) }; }
   function start(e) { drawing = true; last = pos(e); }
-  function move(e) {
-    if (!drawing) return;
-    const p = pos(e);
-    ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke();
-    last = p; e.preventDefault();
-  }
+  function move(e) { if (!drawing) return; const p = pos(e); ctx.beginPath(); ctx.moveTo(last.x, last.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last = p; e.preventDefault(); }
   function end() { drawing = false; }
   canvas.addEventListener("mousedown", start); canvas.addEventListener("mousemove", move); window.addEventListener("mouseup", end);
   canvas.addEventListener("touchstart", start); canvas.addEventListener("touchmove", move); canvas.addEventListener("touchend", end);
 }
-function clearSLDCanvas() {
-  const canvas = document.getElementById("sldCanvas");
-  canvas.getContext("2d").clearRect(0, 0, canvas.width, canvas.height);
-}
+function clearSLDCanvas() { const c = document.getElementById("sldCanvas"); c.getContext("2d").clearRect(0,0,c.width,c.height); }
 async function saveSLDCanvas(bayId) {
   const canvas = document.getElementById("sldCanvas");
-  const dataUrl = canvas.toDataURL("image/png");
-  await apiPost("saveSLD", { bayId, drawing: { dataUrl }, user: State.currentUser });
+  await apiPost("saveSLD", { bayId, drawing: { dataUrl: canvas.toDataURL("image/png") }, user: State.currentUser });
   closeModal();
   renderBayDetail(bayId);
 }
@@ -995,17 +1376,13 @@ async function saveSLDCanvas(bayId) {
 function renderAdmin() {
   app.innerHTML = `
     <h1 class="page-title">Admin</h1>
-    <div class="page-sub">Control who can use auto-prefill remarks when logging maintenance. The top-bar toggle simulates admin login for now — real auth arrives with backend deployment.</div>
+    <div class="page-sub">Control who can use auto-prefill remarks when logging maintenance.</div>
     ${busbarSVG()}
     <div class="card" style="max-width:460px">
       <div style="font-size:13px;font-weight:600;margin-bottom:10px">Users allowed to use prefill</div>
-      <div id="prefillList" style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
         ${State.prefillUsers.length===0 ? `<div style="color:var(--dim);font-size:12px">No users added yet.</div>` :
-          State.prefillUsers.map(u => `
-            <div style="display:flex;justify-content:space-between;align-items:center;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:6px 10px">
-              <span style="font-size:12.5px">${u}</span>
-              <button class="btn danger sm" onclick="removePrefillUser('${u}')">remove</button>
-            </div>`).join("")}
+          State.prefillUsers.map(u => `<div style="display:flex;justify-content:space-between;align-items:center;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:6px 10px"><span style="font-size:12.5px">${u}</span><button class="btn danger sm" onclick="removePrefillUser('${u}')">remove</button></div>`).join("")}
       </div>
       <div style="display:flex;gap:6px">
         <input class="in" id="newPrefillUser" placeholder="User name / ID"/>
@@ -1015,8 +1392,7 @@ function renderAdmin() {
   `;
 }
 async function addPrefillUser() {
-  const input = document.getElementById("newPrefillUser");
-  const v = input.value.trim();
+  const v = document.getElementById("newPrefillUser").value.trim();
   if (!v) return;
   State.prefillUsers.push(v);
   await apiPost("setPrefillUsers", { users: State.prefillUsers });
@@ -1027,7 +1403,6 @@ async function removePrefillUser(u) {
   await apiPost("setPrefillUsers", { users: State.prefillUsers });
   renderAdmin();
 }
-
 function renderStub(k) {
   const titles = { gallery: "Photo Gallery", battery: "Battery Set", dg: "DG Set", other: "Other Maintenance" };
   app.innerHTML = `<h1 class="page-title">${titles[k]}</h1>${busbarSVG()}<div class="card"><div class="empty-note">Coming in a later phase.</div></div>`;
@@ -1037,12 +1412,7 @@ function renderStub(k) {
 // BOOT
 // ---------------------------------------------------------------------------
 document.getElementById("adminSwitch").addEventListener("click", () => { State.isAdmin = !State.isAdmin; render(); });
-
-(async function boot() {
-  await loadAll();
-  render();
-  initWeather();
-})();
+(async function boot() { await loadAll(); render(); initWeather(); })();
 
   </script>
 </body>
