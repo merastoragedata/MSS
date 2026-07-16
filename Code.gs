@@ -25,6 +25,8 @@ const SHEET_TU = "TU_Remarks";                  // station-wide feed, bay-level 
 const SHEET_EQUIP_MU = "Equipment_MU_Remarks";  // equipment-level ad hoc, NOT mirrored to feed
 const SHEET_EQUIP_TU = "Equipment_TU_Remarks";  // equipment-level ad hoc, NOT mirrored to feed
 const SHEET_CUSTOM_EQUIP = "CustomEquipment";   // user-added equipment beyond the auto-template
+const SHEET_HIDDEN_EQUIP = "HiddenEquipment";   // template equipment "deleted" (hidden, reversible)
+const SHEET_ROLE_PERMS = "RolePermissions";     // e.g. MU_FULL_ACCESS / TU_FULL_ACCESS flags
 
 // ---------------------------------------------------------------------------
 // ONE-TIME SETUP - run this manually once from the Apps Script editor.
@@ -34,17 +36,19 @@ function setupSheets() {
 
   const defs = {
     [SHEET_BAYS]: ["BayID", "Name", "VoltageLevel", "Type", "ICTGroup", "Status", "UpdatedBy", "UpdatedAt"],
-    [SHEET_LOG]: ["ID", "BayID", "EquipCode", "Category", "Date", "LoggedBy", "RemarksJSON", "MURemark", "TURemark", "GroupID", "CreatedAt"],
+    [SHEET_LOG]: ["ID", "BayID", "EquipCode", "Category", "Date", "PermitNo", "LoggedBy", "RemarksJSON", "ImagesJSON", "MURemark", "TURemark", "GroupID", "CreatedAt"],
     [SHEET_PREFILL]: ["UserName"],
     [SHEET_SLD]: ["BayID", "DrawingJSON", "UpdatedBy", "UpdatedAt"],
     [SHEET_CONFIG]: ["Key", "Value"],
     [SHEET_CHECKLIST]: ["BayID", "EquipCode", "Category", "SectionsJSON", "UpdatedBy", "UpdatedAt"],
     [SHEET_EQUIPINFO]: ["BayID", "EquipCode", "InfoJSON", "UpdatedBy", "UpdatedAt"],
-    [SHEET_MU]: ["ID", "BayID", "Category", "Date", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_TU]: ["ID", "BayID", "Category", "Date", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_EQUIP_MU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_EQUIP_TU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "LoggedBy", "CreatedAt"],
+    [SHEET_MU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "LoggedBy", "CreatedAt"],
+    [SHEET_TU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "LoggedBy", "CreatedAt"],
+    [SHEET_EQUIP_MU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
+    [SHEET_EQUIP_TU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
     [SHEET_CUSTOM_EQUIP]: ["BayID", "Code", "Label", "EquipType", "PerPhase", "AddedBy", "AddedAt"],
+    [SHEET_HIDDEN_EQUIP]: ["BayID", "EquipCode", "HiddenBy", "HiddenAt"],
+    [SHEET_ROLE_PERMS]: ["Key", "Value"],
   };
 
   Object.keys(defs).forEach((name) => {
@@ -147,6 +151,12 @@ function doGet(e) {
       case "getCustomEquipment":
         result = { items: getAllRows(SHEET_CUSTOM_EQUIP).filter((r) => String(r.BayID) === String(e.parameter.bayId)) };
         break;
+      case "getHiddenEquipment":
+        result = { codes: getAllRows(SHEET_HIDDEN_EQUIP).filter((r) => String(r.BayID) === String(e.parameter.bayId)).map((r) => r.EquipCode) };
+        break;
+      case "getRolePermissions":
+        result = { perms: getConfigMapFrom(SHEET_ROLE_PERMS) };
+        break;
       default:
         result = { error: "Unknown action: " + action };
     }
@@ -188,7 +198,7 @@ function doPost(e) {
         result = logEquipmentMaintenance(body.bayId, body.equipCode, body.groupId, body.entries, body.user);
         break;
       case "addEquipmentRemark":
-        result = addEquipmentRemark(body.kind, body.bayId, body.equipCode, body.date, body.remark, body.user);
+        result = addEquipmentRemark(body.kind, body.bayId, body.equipCode, body.date, body.remark, body.images, body.user);
         break;
       case "addBay":
         result = addBay(body.bay, body.user);
@@ -198,6 +208,24 @@ function doPost(e) {
         break;
       case "addCustomEquipment":
         result = addCustomEquipment(body.bayId, body.item, body.user);
+        break;
+      case "deleteBay":
+        result = deleteBay(body.bayId);
+        break;
+      case "hideEquipment":
+        result = hideEquipment(body.bayId, body.equipCode, body.user);
+        break;
+      case "unhideEquipment":
+        result = unhideEquipment(body.bayId, body.equipCode);
+        break;
+      case "deleteCustomEquipment":
+        result = deleteCustomEquipment(body.bayId, body.equipCode);
+        break;
+      case "setRolePermissions":
+        result = setConfigMapTo(SHEET_ROLE_PERMS, body.perms);
+        break;
+      case "uploadImage":
+        result = uploadImage(body.filename, body.mimeType, body.base64);
         break;
       default:
         result = { error: "Unknown action: " + action };
@@ -254,7 +282,7 @@ function updateBayField(bayId, field, value, user) {
 function getMaintenanceForBay(bayId, equipCode) {
   let rows = getAllRows(SHEET_LOG).filter((r) => String(r.BayID) === String(bayId));
   if (equipCode) rows = rows.filter((r) => String(r.EquipCode) === String(equipCode));
-  return rows.map((r) => ({ ...r, Remarks: safeParse(r.RemarksJSON) }));
+  return rows.map((r) => ({ ...r, Remarks: safeParse(r.RemarksJSON), Images: safeParse(r.ImagesJSON || "[]") }));
 }
 
 function logMaintenance(bayId, groupId, entries, user) {
@@ -316,10 +344,20 @@ function saveSLDForBay(bayId, drawing, user) {
 }
 
 function getConfigMap() {
-  const rows = getAllRows(SHEET_CONFIG);
+  return getConfigMapFrom(SHEET_CONFIG);
+}
+function getConfigMapFrom(sheetName) {
+  const rows = getAllRows(sheetName);
   const map = {};
   rows.forEach((r) => (map[r.Key] = r.Value));
   return map;
+}
+function setConfigMapTo(sheetName, perms) {
+  const sh = getSheet(sheetName);
+  sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 0), 2).clearContent();
+  const rows = Object.keys(perms || {}).map((k) => [k, perms[k]]);
+  if (rows.length) sh.getRange(2, 1, rows.length, 2).setValues(rows);
+  return { ok: true };
 }
 
 function safeParse(str) {
@@ -414,11 +452,11 @@ function logEquipmentMaintenance(bayId, equipCode, groupId, entries, user) {
     const entry = entries[cat];
     if (!entry) return;
     rowsToAdd.push([
-      Utilities.getUuid(), bayId, equipCode, cat, entry.date, entry.loggedBy || user || "unknown",
-      JSON.stringify(entry.remarks || {}), entry.muRemark || "", entry.tuRemark || "", gid, now,
+      Utilities.getUuid(), bayId, equipCode, cat, entry.date, entry.permitNo || "", entry.loggedBy || user || "unknown",
+      JSON.stringify(entry.remarks || {}), JSON.stringify(entry.images || []), entry.muRemark || "", entry.tuRemark || "", gid, now,
     ]);
-    if (entry.muRemark) appendGlobalRemark(SHEET_MU, bayId, cat, entry.date, entry.muRemark, entry.loggedBy || user);
-    if (entry.tuRemark) appendGlobalRemark(SHEET_TU, bayId, cat, entry.date, entry.tuRemark, entry.loggedBy || user);
+    if (entry.muRemark) appendGlobalRemark(SHEET_MU, bayId, cat, entry.date, entry.permitNo, entry.muRemark, entry.loggedBy || user);
+    if (entry.tuRemark) appendGlobalRemark(SHEET_TU, bayId, cat, entry.date, entry.permitNo, entry.tuRemark, entry.loggedBy || user);
   });
   if (rowsToAdd.length) {
     sh.getRange(sh.getLastRow() + 1, 1, rowsToAdd.length, rowsToAdd[0].length).setValues(rowsToAdd);
@@ -426,8 +464,8 @@ function logEquipmentMaintenance(bayId, equipCode, groupId, entries, user) {
   return { ok: true, groupId: gid, saved: rowsToAdd.length };
 }
 
-function appendGlobalRemark(sheetName, bayId, category, date, remark, loggedBy) {
-  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, category, date, remark, loggedBy || "unknown", new Date().toISOString()]);
+function appendGlobalRemark(sheetName, bayId, category, date, permitNo, remark, loggedBy) {
+  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, category, date, permitNo || "", remark, loggedBy || "unknown", new Date().toISOString()]);
 }
 
 // ---------------------------------------------------------------------------
@@ -436,11 +474,12 @@ function appendGlobalRemark(sheetName, bayId, category, date, remark, loggedBy) 
 // ---------------------------------------------------------------------------
 function getEquipmentRemarks(kind, bayId, equipCode) {
   const sheetName = kind === "TU" ? SHEET_EQUIP_TU : SHEET_EQUIP_MU;
-  return getAllRows(sheetName).filter((r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode));
+  return getAllRows(sheetName).filter((r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode))
+    .map((r) => ({ ...r, Images: safeParse(r.ImagesJSON || "[]") }));
 }
-function addEquipmentRemark(kind, bayId, equipCode, date, remark, user) {
+function addEquipmentRemark(kind, bayId, equipCode, date, remark, images, user) {
   const sheetName = kind === "TU" ? SHEET_EQUIP_TU : SHEET_EQUIP_MU;
-  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, equipCode, date, remark, user || "unknown", new Date().toISOString()]);
+  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, equipCode, date, remark, JSON.stringify(images || []), user || "unknown", new Date().toISOString()]);
   return { ok: true };
 }
 
@@ -466,4 +505,74 @@ function addCustomEquipment(bayId, item, user) {
   const now = new Date().toISOString();
   sh.appendRow([bayId, item.code, item.label, item.equipType, item.perPhase ? "TRUE" : "FALSE", user || "unknown", now]);
   return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// DELETE / HIDE (admin only — enforced client-side; the Sheet itself has no
+// row-level ACL, so treat this endpoint as trusted-caller for now)
+// ---------------------------------------------------------------------------
+function deleteBay(bayId) {
+  const sh = getSheet(SHEET_BAYS);
+  const values = sh.getDataRange().getValues();
+  const idIdx = values[0].indexOf("BayID");
+  for (let r = 1; r < values.length; r++) {
+    if (String(values[r][idIdx]) === String(bayId)) {
+      sh.deleteRow(r + 1);
+      return { ok: true };
+    }
+  }
+  return { ok: false, error: "Bay not found: " + bayId };
+}
+
+// Template (SLD-derived) equipment isn't a row anywhere, so "deleting" it
+// means recording it as hidden; reversible via unhideEquipment.
+function hideEquipment(bayId, equipCode, user) {
+  getSheet(SHEET_HIDDEN_EQUIP).appendRow([bayId, equipCode, user || "unknown", new Date().toISOString()]);
+  return { ok: true };
+}
+function unhideEquipment(bayId, equipCode) {
+  const sh = getSheet(SHEET_HIDDEN_EQUIP);
+  const values = sh.getDataRange().getValues();
+  const headers = values[0];
+  const bIdx = headers.indexOf("BayID"), eIdx = headers.indexOf("EquipCode");
+  for (let r = values.length - 1; r >= 1; r--) {
+    if (String(values[r][bIdx]) === String(bayId) && String(values[r][eIdx]) === String(equipCode)) {
+      sh.deleteRow(r + 1);
+    }
+  }
+  return { ok: true };
+}
+// Custom equipment (user-added rows) can be deleted outright.
+function deleteCustomEquipment(bayId, equipCode) {
+  const sh = getSheet(SHEET_CUSTOM_EQUIP);
+  const values = sh.getDataRange().getValues();
+  const headers = values[0];
+  const bIdx = headers.indexOf("BayID"), cIdx = headers.indexOf("Code");
+  for (let r = values.length - 1; r >= 1; r--) {
+    if (String(values[r][bIdx]) === String(bayId) && String(values[r][cIdx]) === String(equipCode)) {
+      sh.deleteRow(r + 1);
+    }
+  }
+  return { ok: true };
+}
+
+// ---------------------------------------------------------------------------
+// IMAGE UPLOAD — stores to Google Drive (a "Karjat Portal Images" folder,
+// created on first use), shared "anyone with link", returns a direct-view
+// URL suitable for <img src>.
+// ---------------------------------------------------------------------------
+function uploadImage(filename, mimeType, base64) {
+  const folder = getOrCreateImagesFolder();
+  const bytes = Utilities.base64Decode(base64);
+  const blob = Utilities.newBlob(bytes, mimeType, filename || "upload.jpg");
+  const file = folder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  const id = file.getId();
+  return { ok: true, fileId: id, imageUrl: `https://drive.google.com/uc?export=view&id=${id}` };
+}
+function getOrCreateImagesFolder() {
+  const name = "Karjat Portal Images";
+  const existing = DriveApp.getFoldersByName(name);
+  if (existing.hasNext()) return existing.next();
+  return DriveApp.createFolder(name);
 }
