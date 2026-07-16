@@ -264,3 +264,24 @@ a{color:var(--accent)}
   font-size:11.5px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;
   margin-bottom:8px;font-family:var(--mono);
 }
+
+/* ---------------------------------------------------------------------
+   PHOTO LIGHTBOX (Google-Photos style)
+--------------------------------------------------------------------- */
+.lightbox-overlay{
+  position:fixed;inset:0;background:rgba(4,8,7,.92);z-index:200;
+  display:flex;flex-direction:column;padding:16px;backdrop-filter:blur(4px);
+}
+.lightbox-topbar{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:8px}
+.lightbox-stage{flex:1;display:flex;align-items:center;justify-content:center;position:relative;min-height:0;overflow:hidden}
+.lightbox-arrow{
+  position:absolute;top:50%;transform:translateY(-50%);background:rgba(20,33,27,.7);
+  border:1px solid var(--border);color:var(--text);width:40px;height:40px;border-radius:50%;
+  font-size:22px;cursor:pointer;z-index:2;
+}
+.lightbox-arrow.left{left:10px}
+.lightbox-arrow.right{right:10px}
+.lightbox-thumbstrip{display:flex;gap:8px;overflow-x:auto;padding:12px 0 4px;justify-content:center}
+.lightbox-thumbstrip img{width:52px;height:52px;object-fit:cover;border-radius:6px;opacity:.5;cursor:pointer;border:2px solid transparent}
+.lightbox-thumbstrip img.active{opacity:1;border-color:var(--accent)}
+.lightbox-editor{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px;margin-top:12px;max-width:640px;margin-left:auto;margin-right:auto}
