@@ -1,431 +1,266 @@
-/**
- * KARJAT 400/220/33 kV SUBSTATION — MAINTENANCE PORTAL
- * Google Apps Script backend. Deploy as Web App:
- *   Deploy > New deployment > type: Web app
- *   Execute as: Me
- *   Who has access: Anyone
- * Then copy the /exec URL and give it to me — I hardcode it into app.js
- * as API_URL and the portal goes live against your Sheet.
- *
- * Bind this script to a Google Sheet (Extensions > Apps Script from within
- * the Sheet) so SpreadsheetApp.getActiveSpreadsheet() resolves correctly.
- * On first run, call setupSheets() once from the Apps Script editor
- * (Run > setupSheets) to create all required tabs with headers.
- */
+/* =============================================================================
+   KARJAT 400/220/33 kV SUBSTATION PORTAL — STYLES
+   Theme: hill-station substation in the Sahyadri ghats (Karjat's real
+   setting — heavy monsoon belt). Palette reads "wet ridge at dusk": deep
+   pine/graphite base, monsoon-teal + weathered-copper accents, amber
+   caution. Weather layer (#weatherCanvas) is driven live by app.js from
+   real current conditions for Karjat.
+   ========================================================================== */
 
-const SHEET_BAYS = "Bays";
-const SHEET_LOG = "MaintenanceLog";
-const SHEET_PREFILL = "PrefillUsers";
-const SHEET_SLD = "SLDDrawings";
-const SHEET_CONFIG = "Config";
-const SHEET_CHECKLIST = "ChecklistState";       // per bay+equipment+category sections/checkpoints
-const SHEET_EQUIPINFO = "EquipmentInfo";        // per bay+equipment info panel (make/sr/etc)
-const SHEET_MU = "MU_Remarks";                  // station-wide feed, bay-level only
-const SHEET_TU = "TU_Remarks";                  // station-wide feed, bay-level only
-const SHEET_EQUIP_MU = "Equipment_MU_Remarks";  // equipment-level ad hoc, NOT mirrored to feed
-const SHEET_EQUIP_TU = "Equipment_TU_Remarks";  // equipment-level ad hoc, NOT mirrored to feed
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
-// ---------------------------------------------------------------------------
-// ONE-TIME SETUP — run this manually once from the Apps Script editor.
-// ---------------------------------------------------------------------------
-function setupSheets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-
-  const defs = {
-    [SHEET_BAYS]: ["BayID", "Name", "VoltageLevel", "Type", "ICTGroup", "Status", "UpdatedBy", "UpdatedAt"],
-    [SHEET_LOG]: ["ID", "BayID", "EquipCode", "Category", "Date", "LoggedBy", "RemarksJSON", "MURemark", "TURemark", "GroupID", "CreatedAt"],
-    [SHEET_PREFILL]: ["UserName"],
-    [SHEET_SLD]: ["BayID", "DrawingJSON", "UpdatedBy", "UpdatedAt"],
-    [SHEET_CONFIG]: ["Key", "Value"],
-    [SHEET_CHECKLIST]: ["BayID", "EquipCode", "Category", "SectionsJSON", "UpdatedBy", "UpdatedAt"],
-    [SHEET_EQUIPINFO]: ["BayID", "EquipCode", "InfoJSON", "UpdatedBy", "UpdatedAt"],
-    [SHEET_MU]: ["ID", "BayID", "Category", "Date", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_TU]: ["ID", "BayID", "Category", "Date", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_EQUIP_MU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_EQUIP_TU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "LoggedBy", "CreatedAt"],
-  };
-
-  Object.keys(defs).forEach((name) => {
-    let sh = ss.getSheetByName(name);
-    if (!sh) sh = ss.insertSheet(name);
-    if (sh.getLastRow() === 0) {
-      sh.getRange(1, 1, 1, defs[name].length).setValues([defs[name]]);
-      sh.setFrozenRows(1);
-    }
-  });
-
-  seedBaysIfEmpty();
+:root{
+  --bg:#0C1512;
+  --bg2:#101B16;
+  --panel:#14211B;
+  --panel2:#1A2A22;
+  --border:#2A3D33;
+  --border-hi:#3D5C4A;
+  --text:#E8F0EA;
+  --dim:#8FA79A;
+  --accent:#3FBFA6;       /* monsoon teal */
+  --accent-dim:#1F6E5F;
+  --copper:#C97C3D;       /* weathered copper */
+  --amber:#E8A83C;        /* caution / due-soon */
+  --red:#E3585A;          /* overdue */
+  --green:#5FD08A;        /* healthy / due-later */
+  --mist:rgba(150,190,175,0.10);
+  --shadow:0 16px 44px rgba(0,0,0,.45);
+  --r:12px;
+  --ui:'Inter',system-ui,sans-serif;
+  --display:'Space Grotesk',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
 }
 
-// Seeds the Bays sheet with the full bay master list, only if empty.
-function seedBaysIfEmpty() {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_BAYS);
-  if (sh.getLastRow() > 1) return; // already seeded
-
-  const rows = [
-    // 400 kV
-    ["400", "400/220 kV 167 MVA SPARE ICT", "400", "ICT-HV", "ICT-SPARE", "Active"],
-    ["401", "400 kV 125 MVAr BUS REACTOR", "400", "Reactor", "", "Active"],
-    ["402", "400 kV Tie Bay 1 (Bus Reactor - ICT 1)", "400", "Tie", "", "Active"],
-    ["403", "400/220 kV 501 MVA ICT 1 HV", "400", "ICT-HV", "ICT1", "Active"],
-    ["404", "400 kV KARJAT - GIRAWALI CKT 1", "400", "Line", "", "Active"],
-    ["405", "400 kV TIE BAY 2 (GIRAWALI 1 - ICT 2)", "400", "Tie", "", "Active"],
-    ["406", "400/220 kV 501 MVA ICT 2 HV", "400", "ICT-HV", "ICT2", "Active"],
-    ["407", "400 kV KARJAT - GIRAWALI CKT 2", "400", "Line", "", "Active"],
-    ["408", "400 kV TIE BAY 3 (GIRAWALI 2 - FUT BAY 1)", "400", "Tie", "", "Active"],
-    ["409", "400/220 kV 501 MVA ICT 3 HV", "400", "ICT-HV", "ICT3", "Active"],
-    ["410", "400 kV KARJAT - LONIKAND CKT 1", "400", "Line", "", "Active"],
-    ["411", "400 kV TIE BAY 4 (LONIKAND 1 - FUT BAY 2)", "400", "Tie", "", "Active"],
-    ["412", "400 kV FUTURE BAY 2", "400", "Future", "", "Future"],
-    ["413", "400 kV KARJAT - LONIKAND CKT 2", "400", "Line", "", "Active"],
-    ["414", "400 kV TIE BAY 5 (LONIKAND 2 - FUT BAY 3)", "400", "Tie", "", "Active"],
-    ["415", "400 kV FUTURE BAY 3", "400", "Future", "", "Future"],
-    // 220 kV
-    ["202", "220 kV ICT 3 IV", "220", "ICT-IV", "ICT3", "Active"],
-    ["203", "220 kV ICT 2 IV", "220", "ICT-IV", "ICT2", "Active"],
-    ["204", "220 kV ICT 1 IV", "220", "ICT-IV", "ICT1", "Active"],
-    ["205", "220 kV KARJAT - AHILYANAGAR CKT", "220", "Line", "", "Active"],
-    ["206", "220 kV KARJAT - BHOSE CKT", "220", "Line", "", "Active"],
-    ["207", "220 kV BUS COUPLER", "220", "BC", "", "Active"],
-    ["208", "220 kV TBC", "220", "TBC", "", "Active"],
-    ["209", "220 kV KARJAT - SHIRSUPHAL CKT", "220", "Line", "", "Active"],
-    ["210", "220 kV KARJAT - BHIGWAN CKT", "220", "Line", "", "Active"],
-    ["211", "220 kV KARJAT - JEUR CKT 1", "220", "Line", "", "Active"],
-    ["212", "220 kV KARJAT - JEUR CKT 2", "220", "Line", "", "Active"],
-    // 33 kV
-    ["33-L1", "33 kV Line Bay", "33", "Line33", "", "Active"],
-    ["33-BS1", "33 kV Bus Sectionaliser Bay", "33", "BS33", "", "Active"],
-    ["33-T1", "33 kV Station Transformer Bay 1", "33", "StnTfr33", "", "Active"],
-    ["33-T2", "33 kV Station Transformer Bay 2", "33", "StnTfr33", "", "Active"],
-  ];
-
-  const now = new Date().toISOString();
-  const withMeta = rows.map((r) => [...r, "system-seed", now]);
-  sh.getRange(2, 1, withMeta.length, withMeta[0].length).setValues(withMeta);
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  background:var(--bg);
+  color:var(--text);
+  font-family:var(--ui);
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;
 }
 
-// ---------------------------------------------------------------------------
-// HTTP entry points
-// ---------------------------------------------------------------------------
-function doGet(e) {
-  try {
-    const action = e.parameter.action || "ping";
-    let result;
-    switch (action) {
-      case "ping":
-        result = { ok: true, message: "Karjat portal API alive" };
-        break;
-      case "getBays":
-        result = { bays: getAllRows(SHEET_BAYS) };
-        break;
-      case "getMaintenance":
-        result = { records: getMaintenanceForBay(e.parameter.bayId, e.parameter.equipCode) };
-        break;
-      case "getPrefillUsers":
-        result = { users: getAllRows(SHEET_PREFILL).map((r) => r.UserName) };
-        break;
-      case "getSLD":
-        result = { drawing: getSLDForBay(e.parameter.bayId) };
-        break;
-      case "getConfig":
-        result = { config: getConfigMap() };
-        break;
-      case "getChecklistState":
-        result = { state: getChecklistState(e.parameter.bayId, e.parameter.equipCode, e.parameter.category) };
-        break;
-      case "getEquipmentInfo":
-        result = { info: getEquipmentInfo(e.parameter.bayId, e.parameter.equipCode) };
-        break;
-      case "getGlobalRemarks":
-        result = { records: getAllRows(e.parameter.kind === "TU" ? SHEET_TU : SHEET_MU) };
-        break;
-      case "getEquipmentRemarks":
-        result = { records: getEquipmentRemarks(e.parameter.kind, e.parameter.bayId, e.parameter.equipCode) };
-        break;
-      default:
-        result = { error: "Unknown action: " + action };
-    }
-    return jsonOut(result);
-  } catch (err) {
-    return jsonOut({ error: String(err) });
-  }
+/* ---------------------------------------------------------------------
+   HILL SILHOUETTE — signature background element: layered ridgelines,
+   evoking the Sahyadri ghats Karjat sits in. Pure CSS, three parallax
+   layers, fixed behind all content.
+--------------------------------------------------------------------- */
+#hillscape{
+  position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
+  background:linear-gradient(180deg,#0A1310 0%, #0C1512 55%, #0E1815 100%);
+}
+.ridge{
+  position:absolute; left:-5%; width:110%; height:38%; bottom:0;
+}
+.ridge svg{width:100%;height:100%;display:block}
+.ridge.r1{ bottom:0;   opacity:.9;  z-index:3; }
+.ridge.r2{ bottom:6%;  opacity:.55; z-index:2; }
+.ridge.r3{ bottom:13%; opacity:.3;  z-index:1; }
+
+/* faint moisture haze that sits over the ridgelines */
+#hillscape::after{
+  content:'';position:absolute; inset:0;
+  background:radial-gradient(1200px 500px at 75% 10%, rgba(63,191,166,.08), transparent 65%);
 }
 
-function doPost(e) {
-  try {
-    const body = JSON.parse(e.postData.contents || "{}");
-    const action = body.action;
-    let result;
-    switch (action) {
-      case "updateBayStatus":
-        result = updateBayField(body.bayId, "Status", body.status, body.user);
-        break;
-      case "renameBay":
-        result = updateBayField(body.bayId, "Name", body.name, body.user);
-        break;
-      case "logMaintenance":
-        result = logMaintenance(body.bayId, body.groupId, body.entries, body.user);
-        break;
-      case "setPrefillUsers":
-        result = setPrefillUsers(body.users);
-        break;
-      case "saveSLD":
-        result = saveSLDForBay(body.bayId, body.drawing, body.user);
-        break;
-      case "saveChecklistState":
-        // body.targets: [{bayId, equipCode}] — same sections applied to every target (scope resolution done client-side)
-        result = saveChecklistStateBulk(body.targets, body.category, body.sections, body.user);
-        break;
-      case "saveEquipmentInfo":
-        result = saveEquipmentInfo(body.bayId, body.equipCode, body.info, body.user);
-        break;
-      case "logEquipmentMaintenance":
-        result = logEquipmentMaintenance(body.bayId, body.equipCode, body.groupId, body.entries, body.user);
-        break;
-      case "addEquipmentRemark":
-        result = addEquipmentRemark(body.kind, body.bayId, body.equipCode, body.date, body.remark, body.user);
-        break;
-      default:
-        result = { error: "Unknown action: " + action };
-    }
-    return jsonOut(result);
-  } catch (err) {
-    return jsonOut({ error: String(err) });
-  }
+/* ---------------------------------------------------------------------
+   WEATHER LAYER — canvas painted by app.js from live conditions.
+   Rain streaks + drifting mist, opacity/intensity driven by weather.js
+--------------------------------------------------------------------- */
+#weatherCanvas{
+  position:fixed; inset:0; z-index:1; pointer-events:none;
+}
+#weatherBadge{
+  position:fixed; bottom:16px; right:16px; z-index:50;
+  background:rgba(20,33,27,.85); border:1px solid var(--border);
+  backdrop-filter:blur(6px);
+  border-radius:999px; padding:7px 14px;
+  font-family:var(--mono); font-size:11.5px; color:var(--dim);
+  display:flex; align-items:center; gap:8px;
+}
+#weatherBadge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+
+#app{position:relative;z-index:2}
+
+/* ---------------------------------------------------------------------
+   TOP BAR
+--------------------------------------------------------------------- */
+#topbar{
+  border-bottom:1px solid var(--border);
+  background:rgba(16,27,22,.78);
+  backdrop-filter:blur(10px);
+  position:sticky; top:0; z-index:20;
+}
+.topbar-inner{
+  max-width:1220px;margin:0 auto;padding:14px 20px;
+  display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;
+}
+.brand{display:flex;align-items:center;gap:12px;cursor:pointer}
+.brand-mark{
+  width:36px;height:36px;border-radius:9px;
+  background:linear-gradient(135deg,var(--accent),var(--accent-dim));
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--display);font-weight:700;color:#052018;font-size:16px;
+  box-shadow:0 0 0 1px rgba(63,191,166,.25), 0 6px 16px rgba(63,191,166,.15);
+}
+.brand-title{font-family:var(--display);font-weight:700;font-size:16px;letter-spacing:.2px}
+.brand-sub{font-family:var(--mono);font-size:11px;color:var(--dim)}
+
+nav.mainnav{display:flex;gap:3px;flex-wrap:wrap}
+nav.mainnav button{
+  background:transparent;border:none;border-radius:7px;
+  color:var(--dim);font-family:var(--ui);font-weight:600;font-size:12.5px;
+  padding:8px 12px;cursor:pointer;transition:.15s;
+}
+nav.mainnav button:hover{color:var(--text)}
+nav.mainnav button.active{background:rgba(63,191,166,.14);color:var(--accent)}
+
+.admin-toggle{display:flex;align-items:center;gap:8px}
+.admin-toggle span{font-family:var(--mono);font-size:11px;color:var(--dim)}
+.switch{width:38px;height:21px;border-radius:999px;background:var(--border);position:relative;cursor:pointer;transition:.15s}
+.switch.on{background:var(--accent)}
+.switch .knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#081410;transition:.15s}
+.switch.on .knob{left:19px}
+
+/* ---------------------------------------------------------------------
+   LAYOUT / TYPE
+--------------------------------------------------------------------- */
+main{max-width:1220px;margin:0 auto;padding:28px 20px 70px}
+.eyebrow{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:1px}
+h1.page-title{font-family:var(--display);font-weight:700;font-size:27px;margin:6px 0 0}
+h2.section-title{font-family:var(--display);font-weight:700;font-size:21px;margin:0}
+.page-sub{color:var(--dim);font-size:13.5px;margin-top:6px}
+
+/* signature divider: energized busbar w/ breaker ticks */
+.busbar{width:100%;height:10px;margin:18px 0;display:block}
+
+/* ---------------------------------------------------------------------
+   CARDS / GRIDS
+--------------------------------------------------------------------- */
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(232px,1fr));gap:14px}
+.card{
+  background:var(--panel);border:1px solid var(--border);border-radius:var(--r);
+  padding:16px;transition:.15s ease;
+}
+.card.clickable{cursor:pointer}
+.card.clickable:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
+
+.badge{
+  display:inline-flex;align-items:center;border-radius:999px;padding:2px 10px;
+  font-family:var(--mono);font-size:10.5px;letter-spacing:.3px;white-space:nowrap;
+  border:1px solid transparent;
+}
+.badge.active{background:rgba(63,191,166,.12);color:var(--accent);border-color:rgba(63,191,166,.32)}
+.badge.soon{background:rgba(232,168,60,.13);color:var(--amber);border-color:rgba(232,168,60,.32)}
+.badge.future{background:rgba(227,88,90,.10);color:var(--red);border-color:rgba(227,88,90,.28)}
+.badge.dim{background:rgba(143,167,154,.10);color:var(--dim);border-color:rgba(143,167,154,.24)}
+
+.status-select{
+  background:var(--panel2);border:1px solid var(--border);color:var(--text);
+  font-family:var(--mono);font-size:11px;border-radius:7px;padding:4px 8px;cursor:pointer;
 }
 
-function jsonOut(obj) {
-  return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
+/* Due-date pill: colored by urgency */
+.due-pill{
+  display:inline-flex;align-items:center;gap:6px;border-radius:8px;padding:6px 10px;
+  font-family:var(--mono);font-size:11.5px;border:1px solid transparent;
 }
+.due-pill .dot{width:7px;height:7px;border-radius:50%}
+.due-pill.ok{background:rgba(95,208,138,.10);color:var(--green);border-color:rgba(95,208,138,.28)}
+.due-pill.ok .dot{background:var(--green)}
+.due-pill.warn{background:rgba(232,168,60,.13);color:var(--amber);border-color:rgba(232,168,60,.32)}
+.due-pill.warn .dot{background:var(--amber)}
+.due-pill.overdue{background:rgba(227,88,90,.13);color:var(--red);border-color:rgba(227,88,90,.32)}
+.due-pill.overdue .dot{background:var(--red)}
 
-// ---------------------------------------------------------------------------
-// Sheet helpers
-// ---------------------------------------------------------------------------
-function getSheet(name) {
-  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+/* ---------------------------------------------------------------------
+   BUTTONS / INPUTS
+--------------------------------------------------------------------- */
+.btn{
+  background:var(--accent);color:#052018;border:1px solid var(--accent);
+  border-radius:8px;padding:9px 16px;font-family:var(--ui);font-weight:700;
+  font-size:13px;cursor:pointer;transition:.12s;
 }
+.btn:hover{filter:brightness(1.08)}
+.btn.ghost{background:transparent;color:var(--text);border-color:var(--border)}
+.btn.ghost:hover{border-color:var(--accent);color:var(--accent)}
+.btn.danger{background:transparent;color:var(--red);border-color:rgba(227,88,90,.4)}
+.btn.sm{padding:6px 11px;font-size:11.5px;border-radius:7px}
+.btn:disabled{opacity:.5;cursor:not-allowed}
 
-function getAllRows(sheetName) {
-  const sh = getSheet(sheetName);
-  const values = sh.getDataRange().getValues();
-  const headers = values.shift();
-  return values
-    .filter((row) => row.some((c) => c !== ""))
-    .map((row) => {
-      const obj = {};
-      headers.forEach((h, i) => (obj[h] = row[i]));
-      return obj;
-    });
+input.in,select.in,textarea.in{
+  width:100%;background:var(--panel2);border:1px solid var(--border);color:var(--text);
+  border-radius:7px;padding:9px 11px;font-size:13px;font-family:var(--ui);outline:none;
 }
+input.in:focus,select.in:focus,textarea.in:focus{border-color:var(--accent)}
+input.mono{font-family:var(--mono)}
+label.fld{display:block;margin-bottom:10px}
+label.fld>span{display:block;font-size:11px;color:var(--dim);margin-bottom:4px;text-transform:uppercase;letter-spacing:.5px}
 
-function updateBayField(bayId, field, value, user) {
-  const sh = getSheet(SHEET_BAYS);
-  const values = sh.getDataRange().getValues();
-  const headers = values[0];
-  const colIdx = headers.indexOf(field);
-  const idIdx = headers.indexOf("BayID");
-  const userIdx = headers.indexOf("UpdatedBy");
-  const atIdx = headers.indexOf("UpdatedAt");
-  for (let r = 1; r < values.length; r++) {
-    if (String(values[r][idIdx]) === String(bayId)) {
-      sh.getRange(r + 1, colIdx + 1).setValue(value);
-      sh.getRange(r + 1, userIdx + 1).setValue(user || "unknown");
-      sh.getRange(r + 1, atIdx + 1).setValue(new Date().toISOString());
-      return { ok: true };
-    }
-  }
-  return { ok: false, error: "Bay not found: " + bayId };
+/* ---------------------------------------------------------------------
+   TABS
+--------------------------------------------------------------------- */
+.tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap}
+.tab{
+  background:transparent;border:1px solid var(--border);color:var(--dim);
+  border-radius:8px;padding:8px 16px;font-size:12.5px;font-weight:600;cursor:pointer;text-transform:capitalize;
 }
+.tab.active{background:var(--panel2);color:var(--accent);border-color:var(--accent)}
 
-function getMaintenanceForBay(bayId, equipCode) {
-  let rows = getAllRows(SHEET_LOG).filter((r) => String(r.BayID) === String(bayId));
-  if (equipCode) rows = rows.filter((r) => String(r.EquipCode) === String(equipCode));
-  return rows.map((r) => ({ ...r, Remarks: safeParse(r.RemarksJSON) }));
-}
+/* ---------------------------------------------------------------------
+   HISTORY LIST
+--------------------------------------------------------------------- */
+.hist-row{border:1px solid var(--border);border-radius:9px;padding:12px;margin-bottom:8px}
+.hist-top{display:flex;justify-content:space-between;font-size:12px}
+.hist-date{font-family:var(--mono);color:var(--accent)}
+.hist-remarks{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+.hist-remark{font-size:11.5px;background:var(--panel2);border:1px solid var(--border);border-radius:6px;padding:4px 8px}
+.hist-remark b{color:var(--dim);font-weight:500}
 
-function logMaintenance(bayId, groupId, entries, user) {
-  // entries: { monthly: {...}|null, quarterly: {...}|null, annual: {...}|null }
-  const sh = getSheet(SHEET_LOG);
-  const now = new Date().toISOString();
-  const gid = groupId || Utilities.getUuid();
-  const rowsToAdd = [];
-  ["monthly", "quarterly", "annual"].forEach((cat) => {
-    const entry = entries[cat];
-    if (!entry) return;
-    rowsToAdd.push([
-      Utilities.getUuid(),
-      bayId,
-      cat.charAt(0).toUpperCase() + cat.slice(1),
-      entry.date,
-      entry.loggedBy || user || "unknown",
-      JSON.stringify(entry.remarks || {}),
-      gid,
-      now,
-    ]);
-  });
-  if (rowsToAdd.length) {
-    sh.getRange(sh.getLastRow() + 1, 1, rowsToAdd.length, rowsToAdd[0].length).setValues(rowsToAdd);
-  }
-  return { ok: true, groupId: gid, saved: rowsToAdd.length };
-}
+.empty-note{color:var(--dim);font-size:13px;text-align:center;padding:26px 0;border:1px dashed var(--border);border-radius:9px}
 
-function setPrefillUsers(users) {
-  const sh = getSheet(SHEET_PREFILL);
-  sh.getRange(2, 1, Math.max(sh.getLastRow() - 1, 0), 1).clearContent();
-  if (users && users.length) {
-    sh.getRange(2, 1, users.length, 1).setValues(users.map((u) => [u]));
-  }
-  return { ok: true };
+/* ---------------------------------------------------------------------
+   MODAL
+--------------------------------------------------------------------- */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(5,10,8,.72);z-index:100;
+  display:flex;align-items:center;justify-content:center;padding:20px;
 }
+.modal{
+  background:var(--panel);border:1px solid var(--border);border-radius:14px;
+  max-width:660px;width:100%;max-height:86vh;overflow-y:auto;padding:22px;
+}
+.checklist-item{border:1px solid var(--border);border-radius:9px;padding:10px;margin-bottom:10px;background:rgba(0,0,0,.12)}
+.checklist-item .row{display:flex;gap:6px}
+.checklist-item .row input,.checklist-item .row textarea{flex:1;min-height:36px;font-family:var(--ui)}
+.checklist-item[draggable="true"]:hover,.card[draggable="true"]:hover{border-color:var(--border-hi)}
+textarea.in{resize:vertical;line-height:1.4}
 
-function getSLDForBay(bayId) {
-  const rows = getAllRows(SHEET_SLD).filter((r) => String(r.BayID) === String(bayId));
-  if (!rows.length) return null;
-  return { drawing: safeParse(rows[rows.length - 1].DrawingJSON), updatedBy: rows[rows.length - 1].UpdatedBy, updatedAt: rows[rows.length - 1].UpdatedAt };
+/* ---------------------------------------------------------------------
+   SLD DRAWING SLOT
+--------------------------------------------------------------------- */
+.sld-frame{
+  border:1px solid var(--border);border-radius:12px;overflow:hidden;
+  background:var(--panel2);min-height:260px;display:flex;align-items:center;justify-content:center;
+  position:relative;
 }
+.sld-frame img,.sld-frame canvas{max-width:100%;display:block}
+.sld-empty{color:var(--dim);font-size:13px;text-align:center;padding:20px}
 
-function saveSLDForBay(bayId, drawing, user) {
-  const sh = getSheet(SHEET_SLD);
-  const values = sh.getDataRange().getValues();
-  const headers = values[0];
-  const idIdx = headers.indexOf("BayID");
-  for (let r = 1; r < values.length; r++) {
-    if (String(values[r][idIdx]) === String(bayId)) {
-      sh.getRange(r + 1, 2).setValue(JSON.stringify(drawing));
-      sh.getRange(r + 1, 3).setValue(user || "unknown");
-      sh.getRange(r + 1, 4).setValue(new Date().toISOString());
-      return { ok: true };
-    }
-  }
-  sh.appendRow([bayId, JSON.stringify(drawing), user || "unknown", new Date().toISOString()]);
-  return { ok: true, created: true };
-}
-
-function getConfigMap() {
-  const rows = getAllRows(SHEET_CONFIG);
-  const map = {};
-  rows.forEach((r) => (map[r.Key] = r.Value));
-  return map;
-}
-
-function safeParse(str) {
-  try {
-    return JSON.parse(str);
-  } catch {
-    return {};
-  }
-}
-
-// ---------------------------------------------------------------------------
-// CHECKLIST STATE (sections/checkpoints) — per bay + equipment + category.
-// Absence of a row means "use the built-in library default" (resolved
-// client-side); this sheet only holds rows once someone has customized them.
-// ---------------------------------------------------------------------------
-function getChecklistState(bayId, equipCode, category) {
-  const rows = getAllRows(SHEET_CHECKLIST).filter(
-    (r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode) && String(r.Category) === String(category)
-  );
-  if (!rows.length) return null;
-  return safeParse(rows[rows.length - 1].SectionsJSON);
-}
-
-// Applies the same section list to every {bayId, equipCode} target — this is
-// how "this bay only" / "selected bays" / "all bays of this type" scope
-// choices are materialized (the app resolves which targets to pass in).
-function saveChecklistStateBulk(targets, category, sections, user) {
-  const sh = getSheet(SHEET_CHECKLIST);
-  const values = sh.getDataRange().getValues();
-  const headers = values[0];
-  const bIdx = headers.indexOf("BayID"), eIdx = headers.indexOf("EquipCode"), cIdx = headers.indexOf("Category");
-  const now = new Date().toISOString();
-  const sectionsJSON = JSON.stringify(sections);
-
-  targets.forEach((t) => {
-    let found = false;
-    for (let r = 1; r < values.length; r++) {
-      if (String(values[r][bIdx]) === String(t.bayId) && String(values[r][eIdx]) === String(t.equipCode) && String(values[r][cIdx]) === String(category)) {
-        sh.getRange(r + 1, headers.indexOf("SectionsJSON") + 1).setValue(sectionsJSON);
-        sh.getRange(r + 1, headers.indexOf("UpdatedBy") + 1).setValue(user || "unknown");
-        sh.getRange(r + 1, headers.indexOf("UpdatedAt") + 1).setValue(now);
-        found = true;
-        break;
-      }
-    }
-    if (!found) {
-      sh.appendRow([t.bayId, t.equipCode, category, sectionsJSON, user || "unknown", now]);
-    }
-  });
-  return { ok: true, count: targets.length };
-}
-
-// ---------------------------------------------------------------------------
-// EQUIPMENT INFO PANEL (make / sr no / type / rated V / rated A / DOC, or
-// per-phase R/Y/B variants for CT & LA)
-// ---------------------------------------------------------------------------
-function getEquipmentInfo(bayId, equipCode) {
-  const rows = getAllRows(SHEET_EQUIPINFO).filter((r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode));
-  if (!rows.length) return null;
-  return safeParse(rows[rows.length - 1].InfoJSON);
-}
-function saveEquipmentInfo(bayId, equipCode, info, user) {
-  const sh = getSheet(SHEET_EQUIPINFO);
-  const values = sh.getDataRange().getValues();
-  const headers = values[0];
-  const bIdx = headers.indexOf("BayID"), eIdx = headers.indexOf("EquipCode");
-  const now = new Date().toISOString();
-  for (let r = 1; r < values.length; r++) {
-    if (String(values[r][bIdx]) === String(bayId) && String(values[r][eIdx]) === String(equipCode)) {
-      sh.getRange(r + 1, headers.indexOf("InfoJSON") + 1).setValue(JSON.stringify(info));
-      sh.getRange(r + 1, headers.indexOf("UpdatedBy") + 1).setValue(user || "unknown");
-      sh.getRange(r + 1, headers.indexOf("UpdatedAt") + 1).setValue(now);
-      return { ok: true };
-    }
-  }
-  sh.appendRow([bayId, equipCode, JSON.stringify(info), user || "unknown", now]);
-  return { ok: true, created: true };
-}
-
-// ---------------------------------------------------------------------------
-// EQUIPMENT-LEVEL MAINTENANCE LOGGING (cascade M->Q->A, per equipment)
-// Optional MU/TU remarks entered during this flow ALSO get mirrored to the
-// station-wide MU_Remarks / TU_Remarks feed (bay-level only, per your spec —
-// equipment already shows its own MSS history so the feed doesn't need it).
-// ---------------------------------------------------------------------------
-function logEquipmentMaintenance(bayId, equipCode, groupId, entries, user) {
-  const sh = getSheet(SHEET_LOG);
-  const now = new Date().toISOString();
-  const gid = groupId || Utilities.getUuid();
-  const rowsToAdd = [];
-  ["Monthly", "Quarterly", "Annual"].forEach((cat) => {
-    const entry = entries[cat];
-    if (!entry) return;
-    rowsToAdd.push([
-      Utilities.getUuid(), bayId, equipCode, cat, entry.date, entry.loggedBy || user || "unknown",
-      JSON.stringify(entry.remarks || {}), entry.muRemark || "", entry.tuRemark || "", gid, now,
-    ]);
-    if (entry.muRemark) appendGlobalRemark(SHEET_MU, bayId, cat, entry.date, entry.muRemark, entry.loggedBy || user);
-    if (entry.tuRemark) appendGlobalRemark(SHEET_TU, bayId, cat, entry.date, entry.tuRemark, entry.loggedBy || user);
-  });
-  if (rowsToAdd.length) {
-    sh.getRange(sh.getLastRow() + 1, 1, rowsToAdd.length, rowsToAdd[0].length).setValues(rowsToAdd);
-  }
-  return { ok: true, groupId: gid, saved: rowsToAdd.length };
-}
-
-function appendGlobalRemark(sheetName, bayId, category, date, remark, loggedBy) {
-  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, category, date, remark, loggedBy || "unknown", new Date().toISOString()]);
-}
-
-// ---------------------------------------------------------------------------
-// EQUIPMENT-LEVEL AD HOC MU/TU REMARKS (not tied to the M/Q/A checklist
-// cycle; local to the equipment, NOT mirrored to the station-wide feed)
-// ---------------------------------------------------------------------------
-function getEquipmentRemarks(kind, bayId, equipCode) {
-  const sheetName = kind === "TU" ? SHEET_EQUIP_TU : SHEET_EQUIP_MU;
-  return getAllRows(sheetName).filter((r) => String(r.BayID) === String(bayId) && String(r.EquipCode) === String(equipCode));
-}
-function addEquipmentRemark(kind, bayId, equipCode, date, remark, user) {
-  const sheetName = kind === "TU" ? SHEET_EQUIP_TU : SHEET_EQUIP_MU;
-  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, equipCode, date, remark, user || "unknown", new Date().toISOString()]);
-  return { ok: true };
+/* ---------------------------------------------------------------------
+   MISC
+--------------------------------------------------------------------- */
+::selection{background:rgba(63,191,166,.32)}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:#26392e;border-radius:8px}
+a{color:var(--accent)}
+.dashed-divider{border-top:1px dashed var(--border);margin-top:8px;padding-top:8px}
+.section-block{margin-bottom:24px}
+.type-label{
+  font-size:11.5px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;
+  margin-bottom:8px;font-family:var(--mono);
 }
