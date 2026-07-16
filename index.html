@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Karjat 400/220/33 kV S/S — Maintenance Portal</title>
 <link rel="stylesheet" href="styles.css" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.css" />
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.1/cropper.min.js"></script>
 </head>
 <body>
 
@@ -45,8 +47,14 @@
         </div>
         <nav class="mainnav" id="mainnav"></nav>
         <div class="admin-toggle">
-          <span id="adminLabel">ADMIN MODE</span>
-          <div class="switch on" id="adminSwitch"><div class="knob"></div></div>
+          <input class="status-select mono" id="userNameInput" placeholder="Your name" style="width:110px" value="Guest User"/>
+          <span style="font-family:var(--mono);font-size:10.5px;color:var(--dim)">ROLE</span>
+          <select class="status-select" id="roleSelect">
+            <option value="Admin">Admin</option>
+            <option value="Editor">Editor</option>
+            <option value="MU">MU Unit</option>
+            <option value="TU">TU Unit</option>
+          </select>
         </div>
       </div>
     </div>
@@ -56,6 +64,7 @@
   </div>
 
   <div id="modalRoot"></div>
+  <div id="lightboxRoot"></div>
   <script>
 /* =============================================================================
    CHECKLIST LIBRARY — extracted directly from your legacy CB/CT/89x/CRP/LA
@@ -70,8 +79,8 @@
    once you send the real sheet (exactly as you said you would).
    ========================================================================== */
 
-function sec(title, items) {
-  return { id: crypto.randomUUID ? crypto.randomUUID() : String(Math.random()), title, items: items.map((t, i) => ({ id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${i}`), text: t })) };
+function sec(title, items, description = "") {
+  return { id: crypto.randomUUID ? crypto.randomUUID() : String(Math.random()), title, description, items: items.map((t, i) => ({ id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${i}`), text: t })) };
 }
 
 const CHECKLIST_LIBRARY = {
@@ -545,6 +554,196 @@ function loopWeather() {
   </script>
   <script>
 /* =============================================================================
+   PHOTO MODULE — a staged picker (attach to a log entry before saving) and a
+   Google-Photos-style lightbox for viewing already-saved images: zoom
+   (scroll/pinch/drag-pan), download, and crop/rotate edit via Cropper.js.
+
+   Note on editing already-uploaded images: Drive-hosted images are
+   cross-origin, so the edit canvas can be tainted and re-upload may be
+   blocked by the browser — if that happens we tell the user plainly rather
+   than fail silently. Editing LOCAL staged photos (before upload) always
+   works since there's no cross-origin restriction yet.
+   ========================================================================== */
+
+// ---- Staged picker (used inside modals: cascade logger, MU/TU add-remark) ----
+// Keeps File objects + local object-URLs in memory until the form is saved,
+// at which point each gets uploaded and swapped for its Drive URL.
+const PhotoStage = { files: [] }; // [{ id, file, localUrl }]
+
+function renderPhotoPicker(inputElId) {
+  return `
+    <div class="fld">
+      <span>Photos</span>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:8px" id="photoStageGrid"></div>
+      <input type="file" id="${inputElId}" accept="image/*" multiple style="display:none" onchange="onPhotoFilesPicked(this.files)"/>
+      <button type="button" class="btn ghost sm" onclick="document.getElementById('${inputElId}').click()">+ Add Photos</button>
+    </div>
+  `;
+}
+function resetPhotoStage() { PhotoStage.files.forEach((f) => URL.revokeObjectURL(f.localUrl)); PhotoStage.files = []; }
+function onPhotoFilesPicked(fileList) {
+  Array.from(fileList).forEach((file) => {
+    PhotoStage.files.push({ id: uid(), file, localUrl: URL.createObjectURL(file) });
+  });
+  renderPhotoStageGrid();
+}
+function renderPhotoStageGrid() {
+  const grid = document.getElementById("photoStageGrid");
+  if (!grid) return;
+  grid.innerHTML = PhotoStage.files.map((f) => `
+    <div style="position:relative;width:64px;height:64px">
+      <img src="${f.localUrl}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer" onclick="openLightbox(${JSON.stringify(PhotoStage.files.map(x=>x.localUrl))}, ${PhotoStage.files.findIndex(x=>x.id===f.id)})"/>
+      <button type="button" onclick="removeStagedPhoto('${f.id}')" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--red);color:#fff;border:none;font-size:11px;cursor:pointer;line-height:1">✕</button>
+    </div>
+  `).join("");
+}
+function removeStagedPhoto(id) {
+  const f = PhotoStage.files.find((x) => x.id === id);
+  if (f) URL.revokeObjectURL(f.localUrl);
+  PhotoStage.files = PhotoStage.files.filter((x) => x.id !== id);
+  renderPhotoStageGrid();
+}
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => resolve(r.result.split(",")[1]);
+    r.onerror = reject;
+    r.readAsDataURL(file);
+  });
+}
+// Uploads every staged file, returns the resulting URL array, then clears the stage.
+async function commitStagedPhotos() {
+  const urls = [];
+  for (const f of PhotoStage.files) {
+    const base64 = await fileToBase64(f.file);
+    const res = await apiPost("uploadImage", { filename: f.file.name, mimeType: f.file.type, base64 });
+    if (res.imageUrl) urls.push(res.imageUrl);
+  }
+  resetPhotoStage();
+  return urls;
+}
+
+// ---- Saved-image grid (for history rows / remark lists) ----
+function renderSavedPhotoGrid(images) {
+  if (!images || !images.length) return "";
+  return `<div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+    ${images.map((url, i) => `<img src="${url}" style="width:56px;height:56px;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer" onclick='openLightbox(${JSON.stringify(images)}, ${i})'/>`).join("")}
+  </div>`;
+}
+
+// ---- Lightbox (Google-Photos-style viewer) ----
+const Lightbox = { images: [], index: 0, scale: 1, cropper: null };
+
+function openLightbox(images, index) {
+  Lightbox.images = images;
+  Lightbox.index = index || 0;
+  Lightbox.scale = 1;
+  renderLightbox();
+}
+function closeLightbox() {
+  destroyCropperIfAny();
+  document.getElementById("lightboxRoot").innerHTML = "";
+}
+function lightboxNav(delta) {
+  destroyCropperIfAny();
+  Lightbox.index = (Lightbox.index + delta + Lightbox.images.length) % Lightbox.images.length;
+  Lightbox.scale = 1;
+  renderLightbox();
+}
+function renderLightbox() {
+  const url = Lightbox.images[Lightbox.index];
+  document.getElementById("lightboxRoot").innerHTML = `
+    <div class="lightbox-overlay" onclick="if(event.target===this)closeLightbox()">
+      <div class="lightbox-topbar">
+        <span style="font-family:var(--mono);font-size:12px;color:var(--dim)">${Lightbox.index + 1} / ${Lightbox.images.length}</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn ghost sm" onclick="lightboxZoom(0.2)">+ Zoom</button>
+          <button class="btn ghost sm" onclick="lightboxZoom(-0.2)">− Zoom</button>
+          <a class="btn ghost sm" href="${url}" download target="_blank" rel="noopener">Download</a>
+          <button class="btn ghost sm" onclick="openEditor()">Edit (crop/rotate)</button>
+          <button class="btn danger sm" onclick="closeLightbox()">Close ✕</button>
+        </div>
+      </div>
+      <div class="lightbox-stage" id="lightboxStage" onwheel="lightboxWheel(event)">
+        ${Lightbox.images.length > 1 ? `<button class="lightbox-arrow left" onclick="lightboxNav(-1)">‹</button>` : ""}
+        <img id="lightboxImg" src="${url}" style="transform:scale(${Lightbox.scale});max-width:100%;max-height:78vh;object-fit:contain;transition:transform .1s"/>
+        ${Lightbox.images.length > 1 ? `<button class="lightbox-arrow right" onclick="lightboxNav(1)">›</button>` : ""}
+      </div>
+      ${Lightbox.images.length > 1 ? `
+        <div class="lightbox-thumbstrip">
+          ${Lightbox.images.map((u, i) => `<img src="${u}" class="${i===Lightbox.index?'active':''}" onclick="event.stopPropagation();destroyCropperIfAny();Lightbox.index=${i};Lightbox.scale=1;renderLightbox()"/>`).join("")}
+        </div>` : ""}
+      <div id="editorRoot"></div>
+    </div>
+  `;
+}
+function lightboxZoom(delta) {
+  Lightbox.scale = Math.max(0.5, Math.min(4, Lightbox.scale + delta));
+  const img = document.getElementById("lightboxImg");
+  if (img) img.style.transform = `scale(${Lightbox.scale})`;
+}
+function lightboxWheel(e) {
+  e.preventDefault();
+  lightboxZoom(e.deltaY < 0 ? 0.15 : -0.15);
+}
+
+function openEditor() {
+  const url = Lightbox.images[Lightbox.index];
+  document.getElementById("editorRoot").innerHTML = `
+    <div class="lightbox-editor">
+      <img id="cropperImg" src="${url}" style="max-width:100%;display:block"/>
+      <div style="display:flex;justify-content:space-between;margin-top:10px;flex-wrap:wrap;gap:8px">
+        <div style="display:flex;gap:6px">
+          <button class="btn ghost sm" onclick="cropperRotate(-90)">⟲ Rotate</button>
+          <button class="btn ghost sm" onclick="cropperRotate(90)">⟳ Rotate</button>
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn ghost sm" onclick="destroyCropperIfAny();document.getElementById('editorRoot').innerHTML=''">Cancel</button>
+          <button class="btn sm" onclick="saveCroppedImage()">Save as new photo</button>
+        </div>
+      </div>
+      <div id="editorMsg" style="font-size:11.5px;color:var(--dim);margin-top:6px"></div>
+    </div>
+  `;
+  const imgEl = document.getElementById("cropperImg");
+  Lightbox.cropper = new Cropper(imgEl, { viewMode: 1, background: false, autoCropArea: 1 });
+}
+function destroyCropperIfAny() {
+  if (Lightbox.cropper) { Lightbox.cropper.destroy(); Lightbox.cropper = null; }
+}
+function cropperRotate(deg) { if (Lightbox.cropper) Lightbox.cropper.rotate(deg); }
+
+// Saves the crop as a NEW image (uploaded fresh) rather than overwriting the
+// original record in place — keeps the maintenance history immutable.
+async function saveCroppedImage() {
+  const msg = document.getElementById("editorMsg");
+  if (!Lightbox.cropper) return;
+  try {
+    const canvas = Lightbox.cropper.getCroppedCanvas();
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
+    if (!blob) throw new Error("toBlob returned null");
+    const base64 = await new Promise((resolve, reject) => {
+      const r = new FileReader();
+      r.onload = () => resolve(r.result.split(",")[1]);
+      r.onerror = reject;
+      r.readAsDataURL(blob);
+    });
+    const res = await apiPost("uploadImage", { filename: `edited_${Date.now()}.jpg`, mimeType: "image/jpeg", base64 });
+    if (res.imageUrl) {
+      msg.textContent = "Saved as a new photo. Reopen the record to see it in its gallery (edits don't overwrite originals).";
+      msg.style.color = "var(--good, #5FD08A)";
+    } else {
+      throw new Error("upload failed");
+    }
+  } catch (err) {
+    msg.textContent = "Couldn't save this edit — the browser blocked reading the image back out (cross-origin restriction on the hosted photo). Download it instead and re-upload the edited version as a new photo.";
+    msg.style.color = "var(--red)";
+  }
+}
+
+  </script>
+  <script>
+/* =============================================================================
    KARJAT 400/220/33 kV SUBSTATION PORTAL — APP LOGIC
    Vanilla JS SPA. Talks to Google Apps Script (code.gs) backed by a Google
    Sheet. Until API_URL is set it runs in DEMO MODE against localStorage.
@@ -554,7 +753,7 @@ function loopWeather() {
 // 1) CONFIG
 // ---------------------------------------------------------------------------
 const CONFIG = {
-  API_URL: "", // <-- paste your Apps Script /exec URL here once deployed
+  API_URL: "https://script.google.com/macros/s/AKfycbzBcjIU0LxzQUA96XOLGSx3ThxNrfb_qw1W0lSidJPSkmGAeG7EwbzXr66mUwlyuo4D/exec",
   SUBSTATION_NAME: "KARJAT 400/220/33 kV S/S",
   SS_CODE: "J966",
   LAT: 18.9107,
@@ -614,12 +813,78 @@ const ICT_GROUPS = [
 const STATUS_OPTIONS = ["Active", "Commissioning Soon", "Future", "Under Maintenance", "Out of Service"];
 
 const REMARK_POOLS = {
-  general: ["Found OK. Checked and recorded in register.", "Checked — no abnormality observed.", "Inspected. Parameters within normal range.", "Physically verified — in order."],
-  cleaning: ["Cleaned thoroughly.", "Cleaning done.", "Cleaned — OK.", "Dust/dirt removed, cleaned."],
-  tightness: ["Checked for tightness — OK.", "Tightening done.", "Connections tightened & verified.", "Checked, tight."],
-  leakage: ["No leakage found.", "No leakage observed on inspection.", "Checked — leak-free.", "No leakage on bushings/joints."],
-  pressure: ["Pressure found OK / as per norms.", "Gas/oil pressure in order.", "Pressure verified within limits.", "Checked — normal pressure."],
-  meggering: ["Insulation resistance within limits.", "IR value healthy — logged in register.", "Megger test OK.", "IR test satisfactory."],
+  general: [
+    "Found OK. Checked and recorded in register.",
+    "Checked — no abnormality observed.",
+    "Inspected. Parameters within normal range.",
+    "Physically verified — in order.",
+    "Routine check carried out — satisfactory.",
+    "Observed healthy during inspection.",
+    "No defect noticed during checking.",
+    "Verified as per schedule — normal condition.",
+    "Examined thoroughly — nothing abnormal found.",
+    "Condition found satisfactory on inspection.",
+  ],
+  cleaning: [
+    "Cleaned thoroughly.",
+    "Cleaning done.",
+    "Cleaned — OK.",
+    "Dust/dirt removed, cleaned.",
+    "Cleaned with dry cloth — surface free of deposits.",
+    "Cleaning carried out as per schedule.",
+    "Accumulated dust removed and wiped clean.",
+    "Cleaned and wiped down — no residue left.",
+    "Surface cleaned; no contamination noticed after.",
+    "Cleaning completed satisfactorily.",
+  ],
+  tightness: [
+    "Checked for tightness — OK.",
+    "Tightening done.",
+    "Connections tightened & verified.",
+    "Checked, tight.",
+    "All terminal connections re-tightened.",
+    "Bolted joints checked and tightened where required.",
+    "Tightness verified with spanner — no looseness found.",
+    "Loose connection (if any) tightened and re-checked.",
+    "Terminal tightness confirmed satisfactory.",
+    "Nut-bolts checked; tightened wherever necessary.",
+  ],
+  leakage: [
+    "No leakage found.",
+    "No leakage observed on inspection.",
+    "Checked — leak-free.",
+    "No leakage on bushings/joints.",
+    "Visual check confirms no oil/gas leakage.",
+    "No seepage noticed at gasket/joint.",
+    "Checked all joints — leak-free condition confirmed.",
+    "No trace of leakage found during inspection.",
+    "Sealing intact; no leakage detected.",
+    "Gaskets and joints checked — no leakage.",
+  ],
+  pressure: [
+    "Pressure found OK / as per norms.",
+    "Gas/oil pressure in order.",
+    "Pressure verified within limits.",
+    "Checked — normal pressure.",
+    "Gauge reading within specified range.",
+    "SF6/oil pressure recorded — normal.",
+    "Pressure checked against nameplate value — satisfactory.",
+    "No abnormal pressure drop observed.",
+    "Pressure gauge reading confirmed healthy.",
+    "Pressure within acceptable operating band.",
+  ],
+  meggering: [
+    "Insulation resistance within limits.",
+    "IR value healthy — logged in register.",
+    "Megger test OK.",
+    "IR test satisfactory.",
+    "Megger reading within prescribed limits.",
+    "Insulation test carried out — result normal.",
+    "IR values recorded — no deterioration noted.",
+    "Megger test conducted; readings satisfactory.",
+    "Insulation resistance test passed.",
+    "IR test result within healthy range as per norms.",
+  ],
 };
 function poolForText(text) {
   const t = text.toLowerCase();
@@ -638,10 +903,11 @@ function pickRemark(checkpointText) {
 // 3) API CLIENT (real or demo/localStorage)
 // ---------------------------------------------------------------------------
 const DemoDB = {
-  key: "karjat_portal_demo_v2",
+  key: "karjat_portal_demo_v3",
   read() {
-    try { return JSON.parse(localStorage.getItem(this.key)) || { bays: {}, customBays: [], records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {}, customEquip: {} }; }
-    catch { return { bays: {}, customBays: [], records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {}, customEquip: {} }; }
+    const blank = { bays: {}, customBays: [], records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {}, customEquip: {}, hiddenEquip: {}, rolePerms: {} };
+    try { return { ...blank, ...(JSON.parse(localStorage.getItem(this.key)) || {}) }; }
+    catch { return blank; }
   },
   write(db) { localStorage.setItem(this.key, JSON.stringify(db)); },
 };
@@ -677,6 +943,8 @@ function demoGet(action, params) {
     return { records: store[`${params.bayId}::${params.equipCode}`] || [] };
   }
   if (action === "getCustomEquipment") return { items: db.customEquip[params.bayId] || [] };
+  if (action === "getHiddenEquipment") return { codes: db.hiddenEquip[params.bayId] || [] };
+  if (action === "getRolePermissions") return { perms: db.rolePerms || {} };
   return {};
 }
 function demoPost(action, body) {
@@ -694,16 +962,16 @@ function demoPost(action, body) {
     ["Monthly", "Quarterly", "Annual"].forEach((cat) => {
       const entry = body.entries[cat];
       if (!entry) return;
-      const rec = { ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: cat, Date: entry.date, LoggedBy: entry.loggedBy || body.user, Remarks: entry.remarks, GroupID: body.groupId, CreatedAt: new Date().toISOString() };
+      const rec = { ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", LoggedBy: entry.loggedBy || body.user, Remarks: entry.remarks, Images: entry.images || [], GroupID: body.groupId, CreatedAt: new Date().toISOString() };
       db.records.push(rec);
-      if (entry.muRemark) db.muFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, Remark: entry.muRemark, LoggedBy: entry.loggedBy || body.user });
-      if (entry.tuRemark) db.tuFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, Remark: entry.tuRemark, LoggedBy: entry.loggedBy || body.user });
+      if (entry.muRemark) db.muFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.muRemark, LoggedBy: entry.loggedBy || body.user });
+      if (entry.tuRemark) db.tuFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.tuRemark, LoggedBy: entry.loggedBy || body.user });
     });
   } else if (action === "addEquipmentRemark") {
     const store = body.kind === "TU" ? db.equipTu : db.equipMu;
     const key = `${body.bayId}::${body.equipCode}`;
     store[key] = store[key] || [];
-    store[key].unshift({ ID: uid(), Date: body.date, Remark: body.remark, LoggedBy: body.user });
+    store[key].unshift({ ID: uid(), Date: body.date, Remark: body.remark, Images: body.images || [], LoggedBy: body.user });
   } else if (action === "addBay") {
     if (![...BAY_MASTER, ...db.customBays].some((b) => b.id === body.bay.id)) db.customBays.push(body.bay);
   } else if (action === "updateBayType") {
@@ -711,6 +979,21 @@ function demoPost(action, body) {
   } else if (action === "addCustomEquipment") {
     db.customEquip[body.bayId] = db.customEquip[body.bayId] || [];
     db.customEquip[body.bayId].push(body.item);
+  } else if (action === "deleteBay") {
+    db.customBays = db.customBays.filter((b) => b.id !== body.bayId);
+    delete db.bays[body.bayId];
+  } else if (action === "hideEquipment") {
+    db.hiddenEquip[body.bayId] = db.hiddenEquip[body.bayId] || [];
+    db.hiddenEquip[body.bayId].push(body.equipCode);
+  } else if (action === "unhideEquipment") {
+    db.hiddenEquip[body.bayId] = (db.hiddenEquip[body.bayId] || []).filter((c) => c !== body.equipCode);
+  } else if (action === "deleteCustomEquipment") {
+    db.customEquip[body.bayId] = (db.customEquip[body.bayId] || []).filter((c) => c.code !== body.equipCode);
+  } else if (action === "setRolePermissions") {
+    db.rolePerms = body.perms;
+  } else if (action === "uploadImage") {
+    // demo mode: keep the data URL itself as the "uploaded" image
+    return { ok: true, imageUrl: `data:${body.mimeType};base64,${body.base64}` };
   }
   DemoDB.write(db);
   return { ok: true };
@@ -748,7 +1031,9 @@ function duePillHTML(status) {
 const State = {
   view: { k: "home" },
   bays: [],
-  isAdmin: true,
+  currentRole: "Admin", // Admin | Editor | MU | TU — client-side role for now; real per-user auth needs backend deployment
+  muFullAccess: false,  // admin-grantable: lets MU-role users use the full cascade logger (not just MU remarks)
+  tuFullAccess: false,  // same, for TU-role users
   prefillUsers: [],
   currentUser: "Guest User",
   _equipTab: {},   // bayId -> selected equipCode
@@ -771,7 +1056,15 @@ async function loadAll() {
   State.prefillUsers = users || [];
 }
 function findBay(id) { return State.bays.find((b) => b.id === id); }
-const canPrefill = () => State.isAdmin || State.prefillUsers.includes(State.currentUser);
+function isAdmin() { return State.currentRole === "Admin"; }
+// Can run the full M/Q/A checklist cascade logger
+function canFullLog() { return isAdmin() || State.currentRole === "Editor" || (State.currentRole === "MU" && State.muFullAccess) || (State.currentRole === "TU" && State.tuFullAccess); }
+// Can add equipment-level ad hoc MU / TU remarks and the MU/TU fields in the cascade logger
+function canEnterMU() { return isAdmin() || State.currentRole === "MU" || canFullLog(); }
+function canEnterTU() { return isAdmin() || State.currentRole === "TU" || canFullLog(); }
+// Structural changes: add/delete bay, add/delete equipment, broaden checklist scope beyond "this bay"
+function canManageStructure() { return isAdmin(); }
+const canPrefill = () => isAdmin() || State.prefillUsers.includes(State.currentUser);
 
 // ICT groups aren't in the Bays sheet — synthesize a bay-shaped entity so
 // the same equipment-panel/checklist/MU-TU machinery works for them too.
@@ -824,9 +1117,8 @@ function renderTopbar() {
   document.getElementById("mainnav").innerHTML = nav.map(([k, label]) =>
     `<button class="${State.view.k === k ? "active" : ""}" onclick="setView({k:'${k}'})">${label}</button>`
   ).join("");
-  const sw = document.getElementById("adminSwitch");
-  sw.className = "switch" + (State.isAdmin ? " on" : "");
-  document.getElementById("adminLabel").textContent = State.isAdmin ? "ADMIN MODE" : "USER MODE";
+  const sel = document.getElementById("roleSelect");
+  if (sel) sel.value = State.currentRole;
 }
 
 function busbarSVG() {
@@ -918,7 +1210,7 @@ function renderBayGrid(voltage, title) {
   app.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
       <h1 class="page-title">${title}</h1>
-      <button class="btn" onclick="openAddBayModal('${voltage}')">+ Add Bay</button>
+      ${canManageStructure() ? `<button class="btn" onclick="openAddBayModal('${voltage}')">+ Add Bay</button>` : ""}
     </div>
     ${busbarSVG()}
     ${Object.entries(groups).map(([type, list]) => `
@@ -1023,8 +1315,10 @@ async function renderBayDetail(bayId) {
   if (!bay) { app.innerHTML = `<div class="empty-note">Bay not found</div>`; return; }
   const templateEquipment = equipmentForBay(bay);
   const { items: customItems } = await apiGet("getCustomEquipment", { bayId });
+  const { codes: hiddenCodes } = await apiGet("getHiddenEquipment", { bayId });
   const customEquipment = (customItems || []).map((c) => ({ code: c.code, label: c.label, perPhase: c.perPhase === true || c.perPhase === "TRUE", equipType: c.equipType, custom: true }));
-  const equipment = [...templateEquipment, ...customEquipment];
+  const hidden = new Set(hiddenCodes || []);
+  const equipment = [...templateEquipment, ...customEquipment].filter((e) => !hidden.has(e.code));
   const activeEquip = State._equipTab[bayId] || equipment[0]?.code;
   State._currentBay = bay;
   State._currentEquipList = equipment;
@@ -1038,7 +1332,10 @@ async function renderBayDetail(bayId) {
           <button class="btn ghost sm" onclick="editBayName('${bay.id}')">edit name</button>
         </div>
       </div>
-      <button class="btn ghost" onclick="openSLDEditor('${bay.id}')">🗺 Draw / View SLD</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn ghost" onclick="openSLDEditor('${bay.id}')">🗺 Draw / View SLD</button>
+        ${canManageStructure() ? `<button class="btn danger" onclick="confirmDeleteBay('${bay.id}')">Delete Bay</button>` : ""}
+      </div>
     </div>
 
     <!-- BAY INFORMATION PANEL -->
@@ -1053,7 +1350,7 @@ async function renderBayDetail(bayId) {
 
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
       <div class="type-label" style="margin:0">Equipment on this bay (${equipment.length}) — tap to open</div>
-      <button class="btn ghost sm" onclick="openAddEquipmentModal('${bay.id}')">+ Add Equipment</button>
+      ${canManageStructure() ? `<button class="btn ghost sm" onclick="openAddEquipmentModal('${bay.id}')">+ Add Equipment</button>` : ""}
     </div>
     <div class="tabs" id="equipTabs">
       ${equipment.map(e => `<button class="tab ${activeEquip===e.code?"active":""}" onclick="selectEquip('${bay.id}','${e.code}')">${e.code}${e.custom?" ✦":""}</button>`).join("")}
@@ -1062,6 +1359,46 @@ async function renderBayDetail(bayId) {
     <div id="equipPanel"></div>
   `;
   if (activeEquip) await renderEquipPanel(bay, equipment.find(e => e.code === activeEquip));
+}
+
+function confirmDeleteEquipment(bayId, equipCode, isCustom) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Delete ${equipCode}?</div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:16px">
+      ${isCustom ? "This removes the custom equipment entry entirely." : "This is SLD-derived equipment — it will be hidden from the bay (reversible by an admin later), not deleted from the diagram."}
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn danger" onclick="doDeleteEquipment('${bayId}','${equipCode}', ${isCustom})">Delete</button>
+    </div>
+  `);
+}
+async function doDeleteEquipment(bayId, equipCode, isCustom) {
+  if (isCustom) await apiPost("deleteCustomEquipment", { bayId, equipCode });
+  else await apiPost("hideEquipment", { bayId, equipCode, user: State.currentUser });
+  delete State._equipTab[bayId];
+  closeModal();
+  renderBayDetail(bayId);
+}
+
+function confirmDeleteBay(bayId) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Delete Bay ${bayId}?</div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:16px">This removes the bay from the directory. Its logged history stays in the Sheet (nothing is bulk-deleted there) but won't be reachable from the UI anymore.</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn danger" onclick="doDeleteBay('${bayId}')">Delete permanently</button>
+    </div>
+  `);
+}
+async function doDeleteBay(bayId) {
+  await apiPost("deleteBay", { bayId, user: State.currentUser });
+  State.bays = State.bays.filter((b) => b.id !== bayId);
+  closeModal();
+  const voltage = bayId.startsWith("33") ? "33" : bayId.startsWith("2") ? "220" : "400";
+  setView({ k: voltage });
 }
 
 function selectEquip(bayId, code) {
@@ -1101,14 +1438,25 @@ async function submitAddEquipment(bayId) {
   renderBayDetail(bayId);
 }
 
-async function editBayName(bayId) {
+function editBayName(bayId) {
   const bay = findBay(bayId);
-  const name = prompt("Bay name:", bay.name);
-  if (name && name.trim()) {
-    await apiPost("renameBay", { bayId, name: name.trim(), user: State.currentUser });
-    bay.name = name.trim();
-    render();
-  }
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit Bay Name</div>
+    <label class="fld"><span>Bay Name</span><input class="in" id="ebn_name" value="${bay.name.replace(/"/g,'&quot;')}"/></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveBayName('${bayId}')">Save</button>
+    </div>
+  `);
+}
+async function saveBayName(bayId) {
+  const name = document.getElementById("ebn_name").value.trim();
+  if (!name) return;
+  await apiPost("renameBay", { bayId, name, user: State.currentUser });
+  const bay = findBay(bayId); bay.name = name;
+  closeModal();
+  render();
 }
 
 // ---------------------------------------------------------------------------
@@ -1138,7 +1486,10 @@ async function renderEquipPanel(bay, equipItem) {
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div style="font-family:var(--display);font-weight:700;font-size:15px">${code} — ${equipItem.label}</div>
-        <button class="btn ghost sm" onclick="editEquipInfo('${bay.id}','${code}', ${equipItem.perPhase})">edit info</button>
+        <div style="display:flex;gap:6px">
+          <button class="btn ghost sm" onclick="editEquipInfo('${bay.id}','${code}', ${equipItem.perPhase})">edit info</button>
+          ${canManageStructure() && !bay.isICT ? `<button class="btn danger sm" onclick="confirmDeleteEquipment('${bay.id}','${code}', ${!!equipItem.custom})">delete</button>` : ""}
+        </div>
       </div>
       <div id="equipInfoDisplay">${renderEquipInfoDisplay(info, equipItem.perPhase)}</div>
     </div>
@@ -1147,13 +1498,13 @@ async function renderEquipPanel(bay, equipItem) {
       <div class="tabs" style="margin-bottom:0">
         ${categories.map(c => `<button class="tab ${cat===c?"active":""}" onclick="switchCategory('${c}')">${c}</button>`).join("")}
       </div>
-      <button class="btn" onclick="openCascadeLogger('${bay.id}','${code}','${equipType}')">+ Log Maintenance Entry</button>
+      ${canFullLog() ? `<button class="btn" onclick="openCascadeLogger('${bay.id}','${code}','${equipType}')">+ Log Maintenance Entry</button>` : ""}
     </div>
     <div style="margin:14px 0">${duePillHTML(dueStatus(cat, equipRecords))}</div>
 
     <div class="type-label" style="display:flex;justify-content:space-between;align-items:center">
       <span>${cat} Checklist</span>
-      <button class="btn ghost sm" onclick="addSection()">+ Add Section</button>
+      ${canFullLog() ? `<button class="btn ghost sm" onclick="addSection()">+ Add Section</button>` : ""}
     </div>
     <div id="sectionsRoot">${renderSections(sections)}</div>
 
@@ -1166,14 +1517,14 @@ async function renderEquipPanel(bay, equipItem) {
       <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <div class="type-label" style="margin:0">Maintenance Unit Remarks</div>
-          <button class="btn ghost sm" onclick="addEquipRemarkPrompt('MU','${bay.id}','${code}')">+ Add</button>
+          ${canEnterMU() ? `<button class="btn ghost sm" onclick="addEquipRemarkPrompt('MU','${bay.id}','${code}')">+ Add</button>` : ""}
         </div>
         <div id="muList">${renderRemarkList(muRes.records || [])}</div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <div class="type-label" style="margin:0">Testing Unit Remarks</div>
-          <button class="btn ghost sm" onclick="addEquipRemarkPrompt('TU','${bay.id}','${code}')">+ Add</button>
+          ${canEnterTU() ? `<button class="btn ghost sm" onclick="addEquipRemarkPrompt('TU','${bay.id}','${code}')">+ Add</button>` : ""}
         </div>
         <div id="tuList">${renderRemarkList(tuRes.records || [])}</div>
       </div>
@@ -1205,26 +1556,69 @@ function renderEquipInfoDisplay(info, perPhase) {
 
 async function editEquipInfo(bayId, code, perPhase) {
   const { info } = await apiGet("getEquipmentInfo", { bayId, equipCode: code });
-  let newInfo;
+  const d = info || {};
+  const root = document.getElementById("modalRoot");
   if (perPhase) {
-    newInfo = {};
-    for (const p of ["R", "Y", "B"]) {
-      const make = prompt(`${p} phase — Make:`, (info && info[p] && info[p].make) || "") || "";
-      const srNo = prompt(`${p} phase — Sr. No.:`, (info && info[p] && info[p].srNo) || "") || "";
-      const doc = prompt(`${p} phase — DOC:`, (info && info[p] && info[p].doc) || "") || "";
-      newInfo[p] = { make, srNo, doc };
-    }
+    const phases = ["R", "Y", "B"];
+    root.innerHTML = modalWrap(`
+      <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit Equipment Info — ${code}</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px">
+        ${phases.map(p => `
+          <div>
+            <div style="font-family:var(--mono);font-size:11px;color:var(--copper);margin-bottom:6px">${p} phase</div>
+            <label class="fld"><span>Make</span><input class="in" id="ei_${p}_make" value="${((d[p]&&d[p].make)||"").replace(/"/g,'&quot;')}"/></label>
+            <label class="fld"><span>Sr. No.</span><input class="in" id="ei_${p}_srNo" value="${((d[p]&&d[p].srNo)||"").replace(/"/g,'&quot;')}"/></label>
+            <label class="fld"><span>DOC</span><input class="in" id="ei_${p}_doc" value="${((d[p]&&d[p].doc)||"").replace(/"/g,'&quot;')}"/></label>
+          </div>
+        `).join("")}
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="saveEquipInfoPerPhase('${bayId}','${code}')">Save</button>
+      </div>
+    `);
   } else {
-    newInfo = {
-      make: prompt("Make:", (info && info.make) || "") || "",
-      srNo: prompt("Sr. No.:", (info && info.srNo) || "") || "",
-      type: prompt("Type:", (info && info.type) || "") || "",
-      ratedVoltage: prompt("Rated Voltage:", (info && info.ratedVoltage) || "") || "",
-      ratedAmps: prompt("Rated Amps:", (info && info.ratedAmps) || "") || "",
-      doc: prompt("DOC:", (info && info.doc) || "") || "",
-    };
+    root.innerHTML = modalWrap(`
+      <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit Equipment Info — ${code}</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <label class="fld"><span>Make</span><input class="in" id="ei_make" value="${(d.make||"").replace(/"/g,'&quot;')}"/></label>
+        <label class="fld"><span>Sr. No.</span><input class="in" id="ei_srNo" value="${(d.srNo||"").replace(/"/g,'&quot;')}"/></label>
+        <label class="fld"><span>Type</span><input class="in" id="ei_type" value="${(d.type||"").replace(/"/g,'&quot;')}"/></label>
+        <label class="fld"><span>Rated Voltage</span><input class="in" id="ei_ratedVoltage" value="${(d.ratedVoltage||"").replace(/"/g,'&quot;')}"/></label>
+        <label class="fld"><span>Rated Amps</span><input class="in" id="ei_ratedAmps" value="${(d.ratedAmps||"").replace(/"/g,'&quot;')}"/></label>
+        <label class="fld"><span>DOC</span><input class="in" id="ei_doc" value="${(d.doc||"").replace(/"/g,'&quot;')}"/></label>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+        <button class="btn ghost" onclick="closeModal()">Cancel</button>
+        <button class="btn" onclick="saveEquipInfoFlat('${bayId}','${code}')">Save</button>
+      </div>
+    `);
   }
+}
+async function saveEquipInfoPerPhase(bayId, code) {
+  const newInfo = {};
+  ["R", "Y", "B"].forEach((p) => {
+    newInfo[p] = {
+      make: document.getElementById(`ei_${p}_make`).value,
+      srNo: document.getElementById(`ei_${p}_srNo`).value,
+      doc: document.getElementById(`ei_${p}_doc`).value,
+    };
+  });
   await apiPost("saveEquipmentInfo", { bayId, equipCode: code, info: newInfo, user: State.currentUser });
+  closeModal();
+  renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === code));
+}
+async function saveEquipInfoFlat(bayId, code) {
+  const newInfo = {
+    make: document.getElementById("ei_make").value,
+    srNo: document.getElementById("ei_srNo").value,
+    type: document.getElementById("ei_type").value,
+    ratedVoltage: document.getElementById("ei_ratedVoltage").value,
+    ratedAmps: document.getElementById("ei_ratedAmps").value,
+    doc: document.getElementById("ei_doc").value,
+  };
+  await apiPost("saveEquipmentInfo", { bayId, equipCode: code, info: newInfo, user: State.currentUser });
+  closeModal();
   renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === code));
 }
 
@@ -1244,9 +1638,15 @@ function renderSections(sections) {
          ondragstart="dragCtx={type:'section',index:${si}}"
          ondragover="event.preventDefault()"
          ondrop="onDropSection(${si})">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;cursor:grab">
-        <div style="font-family:var(--display);font-weight:700;font-size:13.5px">⠿ ${s.title}</div>
-        <button class="btn ghost sm" onclick="addCheckpoint(${si})">+ Add checkpoint</button>
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;cursor:grab">
+        <div>
+          <div style="font-family:var(--display);font-weight:700;font-size:13.5px">⠿ ${s.title}</div>
+          ${s.description ? `<div style="font-size:11.5px;color:var(--dim);margin-top:3px">${s.description}</div>` : ""}
+        </div>
+        <div style="display:flex;gap:6px">
+          <button class="btn ghost sm" onclick="addCheckpoint(${si})">+ Add checkpoint</button>
+          ${canManageStructure() ? `<button class="btn danger sm" onclick="deleteSection(${si})">delete section</button>` : ""}
+        </div>
       </div>
       <div>
         ${s.items.map((it, ii) => `
@@ -1254,7 +1654,10 @@ function renderSections(sections) {
                ondragstart="event.stopPropagation();dragCtx={type:'item',sectionIndex:${si},index:${ii}}"
                ondragover="event.preventDefault()"
                ondrop="event.stopPropagation();onDropItem(${si},${ii})">
-            <div style="font-size:12.5px;margin-bottom:6px;cursor:grab">⠿ ${it.text}</div>
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;cursor:grab">
+              <div style="font-size:12.5px">⠿ ${it.text}</div>
+              ${canManageStructure() ? `<button class="btn danger sm" onclick="deleteCheckpoint(${si},${ii})" style="flex-shrink:0">✕</button>` : ""}
+            </div>
             <div class="row">
               <textarea class="in" rows="1" data-checkpoint="${it.id}" placeholder="Remark…" style="resize:vertical"></textarea>
               ${canPrefill() ? `<button class="btn ghost sm" onclick="prefillCheckpoint('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
@@ -1264,6 +1667,14 @@ function renderSections(sections) {
       </div>
     </div>
   `).join("");
+}
+function deleteSection(si) {
+  State._currentSections.splice(si, 1);
+  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
+}
+function deleteCheckpoint(si, ii) {
+  State._currentSections[si].items.splice(ii, 1);
+  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
 }
 
 function onDropSection(targetIndex) {
@@ -1290,14 +1701,37 @@ function prefillCheckpoint(checkpointId, text) {
 }
 
 function addSection() {
-  const title = prompt("New section title:");
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Add Section</div>
+    <label class="fld"><span>Section title</span><input class="in" id="as_title" placeholder="e.g. MARSHALLING BOX"/></label>
+    <label class="fld"><span>Description (optional — what this section covers)</span><textarea class="in" id="as_desc" rows="2" placeholder="Brief description of this section's scope…"></textarea></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="submitAddSection()">Add & choose scope</button>
+    </div>
+  `);
+}
+function submitAddSection() {
+  const title = document.getElementById("as_title").value.trim();
+  const description = document.getElementById("as_desc").value.trim();
   if (!title) return;
-  const newSection = { id: uid(), title, items: [] };
-  State._currentSections.push(newSection);
+  State._currentSections.push({ id: uid(), title, description, items: [] });
   promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
 }
 function addCheckpoint(sectionIndex) {
-  const text = prompt("New checkpoint text:");
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Add Checkpoint</div>
+    <label class="fld"><span>Checkpoint text</span><textarea class="in" id="ac_text" rows="2" placeholder="e.g. Check earthing continuity"></textarea></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="submitAddCheckpoint(${sectionIndex})">Add & choose scope</button>
+    </div>
+  `);
+}
+function submitAddCheckpoint(sectionIndex) {
+  const text = document.getElementById("ac_text").value.trim();
   if (!text) return;
   State._currentSections[sectionIndex].items.push({ id: uid(), text });
   promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
@@ -1332,8 +1766,10 @@ function promptScopeAndSave(afterLocalRender) {
     <div style="color:var(--dim);font-size:12.5px;margin-bottom:14px">New section/checkpoint on <b>${equipItem.code}</b> (${equipType}, ${cat}). Choose scope:</div>
     <div style="display:flex;flex-direction:column;gap:8px">
       <button class="btn" onclick="applyScope('this')">This bay only (${bay.id})</button>
-      <button class="btn ghost" onclick="showBaySelector()">Select specific bays…</button>
-      <button class="btn ghost" onclick="applyScope('all')">All bays/ICTs with ${equipType} equipment (${sameTypeEntities.length})</button>
+      ${canManageStructure() ? `
+        <button class="btn ghost" onclick="showBaySelector()">Select specific bays…</button>
+        <button class="btn ghost" onclick="applyScope('all')">All bays/ICTs with ${equipType} equipment (${sameTypeEntities.length})</button>
+      ` : `<div style="font-size:11.5px;color:var(--dim)">Broadening to other bays requires Admin role.</div>`}
     </div>
     <div id="baySelectorRoot" style="margin-top:14px"></div>
     <div style="display:flex;justify-content:flex-end;margin-top:16px">
@@ -1377,29 +1813,57 @@ function renderEquipHistory(records, category) {
   if (!list.length) return `<div class="empty-note">No entries yet.</div>`;
   return list.map((r) => {
     const remarks = r.Remarks || (r.RemarksJSON ? JSON.parse(r.RemarksJSON) : {});
+    const images = r.Images || [];
     return `<div class="hist-row">
-      <div class="hist-top"><span class="hist-date">${r.Date}</span><span style="color:var(--dim)">${r.LoggedBy || "—"}</span></div>
+      <div class="hist-top">
+        <span class="hist-date">${r.Date}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
+        <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
+      </div>
       <div class="hist-remarks">${Object.entries(remarks).filter(([,v])=>v).map(([k,v]) => `<div class="hist-remark"><b>${k}:</b> ${v}</div>`).join("")}</div>
+      ${renderSavedPhotoGrid(images)}
     </div>`;
   }).join("");
 }
 function renderRemarkList(records) {
   const list = [...records].sort((a,b) => new Date(b.Date) - new Date(a.Date));
   if (!list.length) return `<div class="empty-note">No remarks yet.</div>`;
-  return list.map((r) => `<div class="hist-row"><div class="hist-top"><span class="hist-date">${r.Date}</span><span style="color:var(--dim)">${r.LoggedBy||"—"}</span></div><div style="font-size:12.5px;margin-top:6px">${r.Remark}</div></div>`).join("");
+  return list.map((r) => `<div class="hist-row">
+    <div class="hist-top"><span class="hist-date">${r.Date}</span><span style="color:var(--dim)">${r.LoggedBy||"—"}</span></div>
+    <div style="font-size:12.5px;margin-top:6px">${r.Remark}</div>
+    ${renderSavedPhotoGrid(r.Images || [])}
+  </div>`).join("");
 }
-async function addEquipRemarkPrompt(kind, bayId, equipCode) {
-  const remark = prompt(`${kind} remark:`);
+function addEquipRemarkPrompt(kind, bayId, equipCode) {
+  resetPhotoStage();
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Add ${kind === "MU" ? "Maintenance Unit" : "Testing Unit"} Remark</div>
+    <label class="fld"><span>Date</span><input class="in mono" id="er_date" value="${new Date().toISOString().slice(0,10)}"/></label>
+    <label class="fld"><span>Remark</span><textarea class="in" id="er_remark" rows="3" placeholder="Describe the work done…"></textarea></label>
+    ${renderPhotoPicker("er_photos_input")}
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="er_saveBtn" onclick="submitEquipRemark('${kind}','${bayId}','${equipCode}')">Save</button>
+    </div>
+  `);
+  renderPhotoStageGrid();
+}
+async function submitEquipRemark(kind, bayId, equipCode) {
+  const remark = document.getElementById("er_remark").value.trim();
   if (!remark) return;
-  const date = new Date().toISOString().slice(0,10);
-  await apiPost("addEquipmentRemark", { kind, bayId, equipCode, date, remark, user: State.currentUser });
+  const btn = document.getElementById("er_saveBtn");
+  btn.disabled = true; btn.textContent = "Saving…";
+  const date = document.getElementById("er_date").value;
+  const images = await commitStagedPhotos();
+  await apiPost("addEquipmentRemark", { kind, bayId, equipCode, date, remark, images, user: State.currentUser });
+  closeModal();
   renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === equipCode));
 }
 
 // ---------------------------------------------------------------------------
 // CASCADE LOGGER — per equipment, categories filtered to what's applicable
 // ---------------------------------------------------------------------------
-function emptyEntry(seed) { return { date: new Date().toISOString().slice(0,10), loggedBy: "", remarks: { ...(seed||{}) }, muRemark: "", tuRemark: "" }; }
+function emptyEntry(seed) { return { date: new Date().toISOString().slice(0,10), permitNo: "", loggedBy: "", remarks: { ...(seed||{}) }, images: [], muRemark: "", tuRemark: "" }; }
 const Cascade = { bay: null, equipCode: null, sections: null, cats: [], idx: 0, stageEntries: {}, groupId: null };
 
 function openCascadeLogger(bayId, equipCode, equipType) {
@@ -1411,6 +1875,7 @@ function openCascadeLogger(bayId, equipCode, equipType) {
   Cascade.idx = 0;
   Cascade.stageEntries = {};
   Cascade.groupId = uid();
+  resetPhotoStage();
   renderCascadeStage();
 }
 async function renderCascadeStage() {
@@ -1421,74 +1886,88 @@ async function renderCascadeStage() {
   const seed = Cascade.idx > 0 ? Cascade.stageEntries[Cascade.cats[Cascade.idx - 1]].remarks : {};
   const entry = emptyEntry(seed);
   Cascade.stageEntries[cat] = entry;
+  const prefill = canPrefill();
 
   const root = document.getElementById("modalRoot");
   root.innerHTML = modalWrap(`
     <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:4px">${cat} Maintenance — ${Cascade.equipCode}</div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0 14px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:10px 0 14px">
       <label class="fld"><span>Date</span><input class="in mono" id="ce_date" value="${entry.date}"/></label>
+      <label class="fld"><span>Permit No.</span><input class="in mono" id="ce_permit" placeholder="e.g. PTW/2026/0142"/></label>
       <label class="fld"><span>Logged by</span><input class="in" id="ce_loggedBy" placeholder="Name / designation"/></label>
     </div>
     <div id="ce_sections">
       ${sections.map((s) => `
         <div style="margin-bottom:10px">
-          <div style="font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px">${s.title}</div>
+          <div style="font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${s.title}</div>
+          ${s.description ? `<div style="font-size:11px;color:var(--dim);margin-bottom:6px;opacity:.8">${s.description}</div>` : ""}
           ${s.items.map((it) => `
             <div class="checklist-item">
               <div style="font-size:12.5px;margin-bottom:6px">${it.text}</div>
               <div class="row">
-                <textarea class="in" rows="1" data-cp="${it.id}" placeholder="Remark…"></textarea>
-                ${canPrefill() ? `<button class="btn ghost sm" onclick="prefillCascadeCP('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
+                <textarea class="in" rows="1" data-cp="${it.id}" placeholder="Remark…">${prefill ? pickRemark(it.text) : ""}</textarea>
+                ${prefill ? `<button class="btn ghost sm" onclick="prefillCascadeCP('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
               </div>
             </div>
           `).join("")}
         </div>
       `).join("")}
     </div>
-    <label class="fld"><span>Maintenance Unit remarks (optional — punched to station MU feed)</span><textarea class="in" id="ce_mu" rows="2"></textarea></label>
-    <label class="fld"><span>Testing Unit remarks (optional — punched to station TU feed)</span><textarea class="in" id="ce_tu" rows="2"></textarea></label>
+    ${renderPhotoPicker("ce_photos_input")}
+    ${canEnterMU() ? `<label class="fld"><span>Maintenance Unit remarks (optional — punched to station MU feed)</span><textarea class="in" id="ce_mu" rows="2"></textarea></label>` : ""}
+    ${canEnterTU() ? `<label class="fld"><span>Testing Unit remarks (optional — punched to station TU feed)</span><textarea class="in" id="ce_tu" rows="2"></textarea></label>` : ""}
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
       <button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" onclick="advanceCascade()">${Cascade.idx < Cascade.cats.length - 1 ? "Save & continue" : "Save all & finish"}</button>
+      <button class="btn" id="ce_saveBtn" onclick="advanceCascade()">${Cascade.idx < Cascade.cats.length - 1 ? "Save & continue" : "Save all & finish"}</button>
     </div>
   `);
+  renderPhotoStageGrid();
 }
 function prefillCascadeCP(id, text) {
   const el = document.querySelector(`textarea[data-cp="${CSS.escape(id)}"]`);
   if (el) el.value = pickRemark(text);
 }
-function collectCascadeForm() {
+async function collectCascadeForm() {
   const remarks = {};
   document.querySelectorAll("#ce_sections textarea[data-cp]").forEach((t) => { remarks[t.dataset.cp] = t.value; });
+  const images = await commitStagedPhotos();
   return {
     date: document.getElementById("ce_date").value,
+    permitNo: document.getElementById("ce_permit").value,
     loggedBy: document.getElementById("ce_loggedBy").value,
     remarks,
-    muRemark: document.getElementById("ce_mu").value,
-    tuRemark: document.getElementById("ce_tu").value,
+    images,
+    muRemark: document.getElementById("ce_mu") ? document.getElementById("ce_mu").value : "",
+    tuRemark: document.getElementById("ce_tu") ? document.getElementById("ce_tu").value : "",
   };
 }
 async function advanceCascade() {
+  const saveBtn = document.getElementById("ce_saveBtn");
+  saveBtn.disabled = true; saveBtn.textContent = "Saving…";
   const cat = Cascade.cats[Cascade.idx];
-  Cascade.stageEntries[cat] = collectCascadeForm();
+  Cascade.stageEntries[cat] = await collectCascadeForm();
   if (Cascade.idx < Cascade.cats.length - 1) {
-    if (Cascade.cats.length > 1) {
-      const proceed = confirm(`Also cover ${Cascade.cats[Cascade.idx + 1]} maintenance in this outage?`);
-      if (!proceed) return finishCascade();
-    }
-    Cascade.idx++;
-    renderCascadeStage();
+    promptContinueCascade();
   } else {
     finishCascade();
   }
 }
+function promptContinueCascade() {
+  const nextCat = Cascade.cats[Cascade.idx + 1];
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Also cover ${nextCat} maintenance in this outage?</div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:16px">If yes, the ${nextCat} form opens prefilled from what you just entered.</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="finishCascade()">No — save & finish</button>
+      <button class="btn" onclick="Cascade.idx++;renderCascadeStage()">Yes — continue to ${nextCat}</button>
+    </div>
+  `);
+}
 async function finishCascade() {
   const entries = {};
-  Cascade.cats.forEach((c) => { if (Cascade.stageEntries[c]) entries[c.charAt(0).toUpperCase() + c.slice(1)] = Cascade.stageEntries[c]; });
-  // normalize keys to Monthly/Quarterly/Annual exactly
-  const norm = {};
-  ["Monthly", "Quarterly", "Annual"].forEach((c) => { if (entries[c]) norm[c] = entries[c]; });
-  await apiPost("logEquipmentMaintenance", { bayId: Cascade.bay.id, equipCode: Cascade.equipCode, groupId: Cascade.groupId, entries: norm, user: State.currentUser });
+  Cascade.cats.forEach((c) => { if (Cascade.stageEntries[c]) entries[c] = Cascade.stageEntries[c]; });
+  await apiPost("logEquipmentMaintenance", { bayId: Cascade.bay.id, equipCode: Cascade.equipCode, groupId: Cascade.groupId, entries, user: State.currentUser });
   closeModal();
   renderEquipPanel(Cascade.bay, State._currentEquipList.find(e => e.code === Cascade.equipCode));
 }
@@ -1509,7 +1988,7 @@ async function renderGlobalRemarks(kind) {
     ${list.length === 0 ? `<div class="empty-note">No ${kind} remarks logged yet.</div>` : list.map((r) => `
       <div class="hist-row">
         <div class="hist-top">
-          <span class="hist-date">${r.Date} · Bay ${r.BayID} · ${r.Category}</span>
+          <span class="hist-date">${r.Date} · Bay ${r.BayID} · ${r.Category}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
           <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
         </div>
         <div style="font-size:12.5px;margin-top:6px">${r.Remark}</div>
@@ -1613,10 +2092,24 @@ async function saveSLDCanvas(bayId) {
 // ADMIN
 // ---------------------------------------------------------------------------
 function renderAdmin() {
+  if (!isAdmin()) {
+    app.innerHTML = `<h1 class="page-title">Admin</h1>${busbarSVG()}<div class="card"><div class="empty-note">Admin role required. Switch roles in the top bar (demo-mode role switch) to view this page.</div></div>`;
+    return;
+  }
   app.innerHTML = `
     <h1 class="page-title">Admin</h1>
-    <div class="page-sub">Control who can use auto-prefill remarks when logging maintenance.</div>
+    <div class="page-sub">Role-based access control. The topbar ROLE selector simulates login for now — real per-user auth needs backend deployment.</div>
     ${busbarSVG()}
+    <div class="card" style="max-width:520px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Role permissions</div>
+      <div style="font-size:11.5px;color:var(--dim);margin-bottom:12px">Admin and Editor always have full logging access. MU/TU roles are normally limited to their own remarks — grant "full data" to let them use the complete M/Q/A checklist logger too (i.e. enter each other's data).</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;cursor:pointer">
+        <input type="checkbox" id="muFullAccess" ${State.muFullAccess ? "checked" : ""} onchange="toggleRolePerm('MU_FULL_ACCESS', this.checked)"/> MU role can enter full maintenance data (not just MU remarks)
+      </label>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer">
+        <input type="checkbox" id="tuFullAccess" ${State.tuFullAccess ? "checked" : ""} onchange="toggleRolePerm('TU_FULL_ACCESS', this.checked)"/> TU role can enter full maintenance data (not just TU remarks)
+      </label>
+    </div>
     <div class="card" style="max-width:460px">
       <div style="font-size:13px;font-weight:600;margin-bottom:10px">Users allowed to use prefill</div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px">
@@ -1629,6 +2122,10 @@ function renderAdmin() {
       </div>
     </div>
   `;
+}
+async function toggleRolePerm(key, checked) {
+  if (key === "MU_FULL_ACCESS") State.muFullAccess = checked; else State.tuFullAccess = checked;
+  await apiPost("setRolePermissions", { perms: { MU_FULL_ACCESS: String(State.muFullAccess), TU_FULL_ACCESS: String(State.tuFullAccess) } });
 }
 async function addPrefillUser() {
   const v = document.getElementById("newPrefillUser").value.trim();
@@ -1650,8 +2147,16 @@ function renderStub(k) {
 // ---------------------------------------------------------------------------
 // BOOT
 // ---------------------------------------------------------------------------
-document.getElementById("adminSwitch").addEventListener("click", () => { State.isAdmin = !State.isAdmin; render(); });
-(async function boot() { await loadAll(); render(); initWeather(); })();
+document.getElementById("roleSelect").addEventListener("change", (e) => { State.currentRole = e.target.value; render(); });
+document.getElementById("userNameInput").addEventListener("change", (e) => { State.currentUser = e.target.value.trim() || "Guest User"; });
+(async function boot() {
+  await loadAll();
+  const { perms } = await apiGet("getRolePermissions");
+  State.muFullAccess = (perms && perms.MU_FULL_ACCESS) === "true";
+  State.tuFullAccess = (perms && perms.TU_FULL_ACCESS) === "true";
+  render();
+  initWeather();
+})();
 
   </script>
 </body>
