@@ -8,10 +8,27 @@
  * as API_URL and the portal goes live against your Sheet.
  *
  * Bind this script to a Google Sheet (Extensions > Apps Script from within
- * the Sheet) so SpreadsheetApp.getActiveSpreadsheet() resolves correctly.
+ * the Sheet), but ALSO paste that Sheet's ID into SPREADSHEET_ID below.
+ * (SpreadsheetApp.getActiveSpreadsheet() is unreliable when this script runs
+ * as a deployed web app -- it has no "active" UI, so it can randomly return
+ * null. openById() with an explicit ID is the reliable way.)
+ * To get the ID: open your Sheet, copy the long string in the URL between
+ * /d/ and /edit -- e.g. docs.google.com/spreadsheets/d/THIS_PART/edit
  * On first run, call setupSheets() once from the Apps Script editor
  * (Run > setupSheets) to create all required tabs with headers.
  */
+
+const SPREADSHEET_ID = "PASTE_YOUR_SHEET_ID_HERE";
+
+function getSS() {
+  if (SPREADSHEET_ID && SPREADSHEET_ID !== "PASTE_YOUR_SHEET_ID_HERE") {
+    return SpreadsheetApp.openById(SPREADSHEET_ID);
+  }
+  // Fallback for manual runs from the bound script editor (e.g. setupSheets())
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) throw new Error("No SPREADSHEET_ID set and no active spreadsheet -- paste your Sheet ID into SPREADSHEET_ID at the top of code.gs.");
+  return ss;
+}
 
 const SHEET_BAYS = "Bays";
 const SHEET_LOG = "MaintenanceLog";
@@ -32,7 +49,7 @@ const SHEET_ROLE_PERMS = "RolePermissions";     // e.g. MU_FULL_ACCESS / TU_FULL
 // ONE-TIME SETUP - run this manually once from the Apps Script editor.
 // ---------------------------------------------------------------------------
 function setupSheets() {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = getSS();
 
   const defs = {
     [SHEET_BAYS]: ["BayID", "Name", "VoltageLevel", "Type", "ICTGroup", "Status", "UpdatedBy", "UpdatedAt"],
@@ -65,7 +82,7 @@ function setupSheets() {
 
 // Seeds the Bays sheet with the full bay master list, only if empty.
 function seedBaysIfEmpty() {
-  const sh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(SHEET_BAYS);
+  const sh = getSS().getSheetByName(SHEET_BAYS);
   if (sh.getLastRow() > 1) return; // already seeded
 
   const rows = [
@@ -244,7 +261,7 @@ function jsonOut(obj) {
 // Sheet helpers
 // ---------------------------------------------------------------------------
 function getSheet(name) {
-  return SpreadsheetApp.getActiveSpreadsheet().getSheetByName(name);
+  return getSS().getSheetByName(name);
 }
 
 function getAllRows(sheetName) {
