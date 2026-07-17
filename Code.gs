@@ -1,34 +1,28 @@
 /**
  * KARJAT 400/220/33 kV SUBSTATION - MAINTENANCE PORTAL
- * Google Apps Script backend. Deploy as Web App:
- *   Deploy > New deployment > type: Web app
- *   Execute as: Me
- *   Who has access: Anyone
- * Then copy the /exec URL and give it to me - I hardcode it into app.js
- * as API_URL and the portal goes live against your Sheet.
+ * Google Apps Script backend.
  *
- * Bind this script to a Google Sheet (Extensions > Apps Script from within
- * the Sheet), but ALSO paste that Sheet's ID into SPREADSHEET_ID below.
- * (SpreadsheetApp.getActiveSpreadsheet() is unreliable when this script runs
- * as a deployed web app -- it has no "active" UI, so it can randomly return
- * null. openById() with an explicit ID is the reliable way.)
- * To get the ID: open your Sheet, copy the long string in the URL between
- * /d/ and /edit -- e.g. docs.google.com/spreadsheets/d/THIS_PART/edit
- * On first run, call setupSheets() once from the Apps Script editor
- * (Run > setupSheets) to create all required tabs with headers.
+ * SETUP (run once):
+ *   1. In script.google.com (or Extensions > Apps Script on any blank
+ *      Sheet), paste this whole file in as Code.gs.
+ *   2. In the function dropdown near the Run button, select "initialize",
+ *      click Run. First time it'll ask you to authorize -- approve it.
+ *   3. That's it -- it creates its own Spreadsheet (named "Karjat Portal DB"),
+ *      builds every tab it needs, and seeds the bay list. No manual Sheet
+ *      creation, no IDs to copy.
+ *
+ * DEPLOY:
+ *   Deploy > New deployment > type: Web app > Execute as: Me > Who has
+ *   access: Anyone. Copy the /exec URL and give it to me -- I hardcode it
+ *   into app.js as API_URL and the portal goes live against your Sheet.
+ *
+ * Why not SpreadsheetApp.getActiveSpreadsheet()? It only resolves when a
+ * script runs inside a Sheet's own UI. A deployed web app has no such
+ * context, so that call randomly returns null depending on the request.
+ * This file instead creates a Spreadsheet once and remembers its ID via
+ * PropertiesService, which works identically from the editor, from the web
+ * app, and from any device.
  */
-
-const SPREADSHEET_ID = "PASTE_YOUR_SHEET_ID_HERE";
-
-function getSS() {
-  if (SPREADSHEET_ID && SPREADSHEET_ID !== "PASTE_YOUR_SHEET_ID_HERE") {
-    return SpreadsheetApp.openById(SPREADSHEET_ID);
-  }
-  // Fallback for manual runs from the bound script editor (e.g. setupSheets())
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
-  if (!ss) throw new Error("No SPREADSHEET_ID set and no active spreadsheet -- paste your Sheet ID into SPREADSHEET_ID at the top of code.gs.");
-  return ss;
-}
 
 const SHEET_BAYS = "Bays";
 const SHEET_LOG = "MaintenanceLog";
@@ -45,44 +39,81 @@ const SHEET_CUSTOM_EQUIP = "CustomEquipment";   // user-added equipment beyond t
 const SHEET_HIDDEN_EQUIP = "HiddenEquipment";   // template equipment "deleted" (hidden, reversible)
 const SHEET_ROLE_PERMS = "RolePermissions";     // e.g. MU_FULL_ACCESS / TU_FULL_ACCESS flags
 
+// Single source of truth for every tab's header row. Used by both the
+// one-time initialize() and the self-healing getSheet() (so if a future
+// version of this file adds a new sheet type, it just appears on demand).
+const SHEET_DEFS = {
+  [SHEET_BAYS]: ["BayID", "Name", "VoltageLevel", "Type", "ICTGroup", "Status", "UpdatedBy", "UpdatedAt"],
+  [SHEET_LOG]: ["ID", "BayID", "EquipCode", "Category", "Date", "PermitNo", "LoggedBy", "RemarksJSON", "ImagesJSON", "MURemark", "TURemark", "GroupID", "CreatedAt"],
+  [SHEET_PREFILL]: ["UserName"],
+  [SHEET_SLD]: ["BayID", "DrawingJSON", "UpdatedBy", "UpdatedAt"],
+  [SHEET_CONFIG]: ["Key", "Value"],
+  [SHEET_CHECKLIST]: ["BayID", "EquipCode", "Category", "SectionsJSON", "UpdatedBy", "UpdatedAt"],
+  [SHEET_EQUIPINFO]: ["BayID", "EquipCode", "InfoJSON", "UpdatedBy", "UpdatedAt"],
+  [SHEET_MU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "LoggedBy", "CreatedAt"],
+  [SHEET_TU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "LoggedBy", "CreatedAt"],
+  [SHEET_EQUIP_MU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
+  [SHEET_EQUIP_TU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
+  [SHEET_CUSTOM_EQUIP]: ["BayID", "Code", "Label", "EquipType", "PerPhase", "AddedBy", "AddedAt"],
+  [SHEET_HIDDEN_EQUIP]: ["BayID", "EquipCode", "HiddenBy", "HiddenAt"],
+  [SHEET_ROLE_PERMS]: ["Key", "Value"],
+};
+
 // ---------------------------------------------------------------------------
-// ONE-TIME SETUP - run this manually once from the Apps Script editor.
+// SELF-PROVISIONING SPREADSHEET
+// First call ever: creates a new Spreadsheet and remembers its ID in Script
+// Properties (persists across every future execution -- editor, web app,
+// any device). Every later call just opens that same ID directly.
 // ---------------------------------------------------------------------------
-function setupSheets() {
+function getSS() {
+  const props = PropertiesService.getScriptProperties();
+  const existingId = props.getProperty("SPREADSHEET_ID");
+  if (existingId) {
+    try {
+      return SpreadsheetApp.openById(existingId);
+    } catch (e) {
+      // stored ID no longer valid (e.g. sheet was deleted) -- fall through and recreate
+    }
+  }
+  const ss = SpreadsheetApp.create("Karjat Portal DB");
+  props.setProperty("SPREADSHEET_ID", ss.getId());
+  return ss;
+}
+
+// Creates a sheet tab (with header row) if it doesn't already exist.
+// Called lazily by getSheet(), so nothing needs to be pre-created --
+// the very first live doGet/doPost will build whatever it needs.
+function ensureSheet(name) {
   const ss = getSS();
-
-  const defs = {
-    [SHEET_BAYS]: ["BayID", "Name", "VoltageLevel", "Type", "ICTGroup", "Status", "UpdatedBy", "UpdatedAt"],
-    [SHEET_LOG]: ["ID", "BayID", "EquipCode", "Category", "Date", "PermitNo", "LoggedBy", "RemarksJSON", "ImagesJSON", "MURemark", "TURemark", "GroupID", "CreatedAt"],
-    [SHEET_PREFILL]: ["UserName"],
-    [SHEET_SLD]: ["BayID", "DrawingJSON", "UpdatedBy", "UpdatedAt"],
-    [SHEET_CONFIG]: ["Key", "Value"],
-    [SHEET_CHECKLIST]: ["BayID", "EquipCode", "Category", "SectionsJSON", "UpdatedBy", "UpdatedAt"],
-    [SHEET_EQUIPINFO]: ["BayID", "EquipCode", "InfoJSON", "UpdatedBy", "UpdatedAt"],
-    [SHEET_MU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_TU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "LoggedBy", "CreatedAt"],
-    [SHEET_EQUIP_MU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
-    [SHEET_EQUIP_TU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
-    [SHEET_CUSTOM_EQUIP]: ["BayID", "Code", "Label", "EquipType", "PerPhase", "AddedBy", "AddedAt"],
-    [SHEET_HIDDEN_EQUIP]: ["BayID", "EquipCode", "HiddenBy", "HiddenAt"],
-    [SHEET_ROLE_PERMS]: ["Key", "Value"],
-  };
-
-  Object.keys(defs).forEach((name) => {
-    let sh = ss.getSheetByName(name);
-    if (!sh) sh = ss.insertSheet(name);
-    if (sh.getLastRow() === 0) {
-      sh.getRange(1, 1, 1, defs[name].length).setValues([defs[name]]);
+  let sh = ss.getSheetByName(name);
+  if (!sh) {
+    sh = ss.insertSheet(name);
+    const headers = SHEET_DEFS[name];
+    if (headers) {
+      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
       sh.setFrozenRows(1);
     }
-  });
-
-  seedBaysIfEmpty();
+  }
+  return sh;
 }
+
+// ---------------------------------------------------------------------------
+// ONE-TIME SETUP -- run this manually once from the Apps Script editor.
+// Not strictly required (every sheet self-creates on first use via
+// ensureSheet), but running it once also seeds the bay master list and is
+// the natural place to grant this script its permissions the first time.
+// ---------------------------------------------------------------------------
+function initialize() {
+  Object.keys(SHEET_DEFS).forEach((name) => ensureSheet(name));
+  seedBaysIfEmpty();
+  return getSS().getUrl(); // handy to see in the execution log
+}
+// kept as an alias since earlier instructions referenced this name
+function setupSheets() { return initialize(); }
 
 // Seeds the Bays sheet with the full bay master list, only if empty.
 function seedBaysIfEmpty() {
-  const sh = getSS().getSheetByName(SHEET_BAYS);
+  const sh = ensureSheet(SHEET_BAYS);
   if (sh.getLastRow() > 1) return; // already seeded
 
   const rows = [
@@ -261,7 +292,7 @@ function jsonOut(obj) {
 // Sheet helpers
 // ---------------------------------------------------------------------------
 function getSheet(name) {
-  return getSS().getSheetByName(name);
+  return ensureSheet(name);
 }
 
 function getAllRows(sheetName) {
