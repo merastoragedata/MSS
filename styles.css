@@ -1,31 +1,92 @@
 /* =============================================================================
    KARJAT 400/220/33 kV SUBSTATION PORTAL — STYLES
-   Theme: hill-station substation in the Sahyadri ghats (Karjat's real
-   setting — heavy monsoon belt). Palette reads "wet ridge at dusk": deep
-   pine/graphite base, monsoon-teal + weathered-copper accents, amber
-   caution. Weather layer (#weatherCanvas) is driven live by app.js from
-   real current conditions for Karjat.
+   Theme: Bhima riverside at Siddhatek (Karjat, Ahmednagar district) —
+   weather-reactive. Real conditions (or a manual override) drive one of
+   four palettes via a body class, applied by weather.js:
+     .weather-sunny   bright yellow, black text
+     .weather-cloudy  grey-blue, dims with cloud cover %, black text
+     .weather-rainy   grey, light text, rain streaks on #weatherCanvas
+     .weather-off     admin-disabled effects: sunny with very light cloud
+   The :root block below is the sunny/default palette; other modes override
+   the same variable names, so every component below just uses var(--x) and
+   never needs to know which weather is active.
    ========================================================================== */
 
 @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
-:root{
-  --bg:#0C1512;
-  --bg2:#101B16;
-  --panel:#14211B;
-  --panel2:#1A2A22;
-  --border:#2A3D33;
-  --border-hi:#3D5C4A;
-  --text:#E8F0EA;
-  --dim:#8FA79A;
-  --accent:#3FBFA6;       /* monsoon teal */
-  --accent-dim:#1F6E5F;
-  --copper:#C97C3D;       /* weathered copper */
-  --amber:#E8A83C;        /* caution / due-soon */
-  --red:#E3585A;          /* overdue */
-  --green:#5FD08A;        /* healthy / due-later */
-  --mist:rgba(150,190,175,0.10);
-  --shadow:0 16px 44px rgba(0,0,0,.45);
+:root, body.weather-sunny, body.weather-off{
+  --bg:#FFDD55;
+  --bg2:#FFE98A;
+  --panel:rgba(255,255,255,0.66);
+  --panel2:#FFF3C4;
+  --border:rgba(120,90,10,0.28);
+  --border-hi:rgba(120,90,10,0.45);
+  --text:#1C1400;
+  --dim:#6B5518;
+  --accent:#C2540B;       /* sun-baked terracotta */
+  --accent-dim:#8C3D08;
+  --on-accent:#221600;
+  --copper:#A6460B;
+  --amber:#B8790A;
+  --red:#B23327;
+  --green:#2F7A3C;
+  --mist:rgba(255,255,255,0.20);
+  --river-top:#7BAFCE;
+  --river-bottom:#2E6B92;
+  --shadow:0 16px 44px rgba(90,60,0,.18);
+  --r:12px;
+  --ui:'Inter',system-ui,sans-serif;
+  --display:'Space Grotesk',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+
+body.weather-cloudy{
+  /* base values; weather.js fine-tunes --bg/--bg2/--river-* per live cloud % */
+  --bg:#B9C4CC;
+  --bg2:#CBD5DB;
+  --panel:rgba(255,255,255,0.55);
+  --panel2:#E4E9EC;
+  --border:rgba(40,50,58,0.22);
+  --border-hi:rgba(40,50,58,0.38);
+  --text:#141414;
+  --dim:#4B545B;
+  --accent:#5B5F97;       /* muted overcast periwinkle-violet, not teal */
+  --accent-dim:#40436E;
+  --on-accent:#F5F7F8;
+  --copper:#8A5A2E;
+  --amber:#9C6A0A;
+  --red:#A32E24;
+  --green:#2D6B3C;
+  --mist:rgba(255,255,255,0.16);
+  --river-top:#9FB2BC;
+  --river-bottom:#5D7A85;
+  --shadow:0 16px 44px rgba(30,40,48,.18);
+  --r:12px;
+  --ui:'Inter',system-ui,sans-serif;
+  --display:'Space Grotesk',sans-serif;
+  --mono:'IBM Plex Mono',ui-monospace,monospace;
+}
+
+body.weather-rainy{
+  --bg:#5B6470;
+  --bg2:#4E5763;
+  --panel:rgba(255,255,255,0.10);
+  --panel2:rgba(255,255,255,0.06);
+  --border:rgba(255,255,255,0.16);
+  --border-hi:rgba(255,255,255,0.28);
+  --text:#F2F5F7;
+  --dim:#B7C0C8;
+  --accent:#E8A23F;       /* warm amber lamplight-through-rain, not teal */
+  --accent-dim:#B87A22;
+  --on-accent:#241400;
+  --copper:#E0A868;
+  --amber:#F5B942;
+  --red:#F0757A;
+  --green:#7CDFA0;
+  --mist:rgba(150,190,175,0.12);
+  --river-top:#6E7C87;
+  --river-bottom:#404B57;
+  --shadow:0 16px 44px rgba(0,0,0,.35);
   --r:12px;
   --ui:'Inter',system-ui,sans-serif;
   --display:'Space Grotesk',sans-serif;
@@ -35,54 +96,107 @@
 *{box-sizing:border-box}
 html,body{margin:0;height:100%}
 body{
-  background:var(--bg);
+  background:linear-gradient(180deg, var(--bg2), var(--bg));
   color:var(--text);
   font-family:var(--ui);
   font-size:14px;
   line-height:1.5;
   -webkit-font-smoothing:antialiased;
   overflow-x:hidden;
+  transition:background 900ms ease, color 500ms ease;
 }
 
 /* ---------------------------------------------------------------------
-   HILL SILHOUETTE — signature background element: layered ridgelines,
-   evoking the Sahyadri ghats Karjat sits in. Pure CSS, three parallax
-   layers, fixed behind all content.
+   RIVERSIDE BACKDROP — Bhima river at Siddhatek: distant hills, a small
+   temple-spire silhouette, and a reflective river band across the base.
+   Pure CSS/SVG, fixed behind all content, recolored entirely by the
+   weather CSS variables above (no separate per-weather image assets).
 --------------------------------------------------------------------- */
 #hillscape{
   position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
-  background:linear-gradient(180deg,#0A1310 0%, #0C1512 55%, #0E1815 100%);
+  background:linear-gradient(180deg, var(--bg2) 0%, var(--bg) 60%, var(--river-bottom) 100%);
+  transition:background 900ms ease;
 }
+#sunDisc{
+  position:absolute; top:8%; right:12%; width:120px; height:120px; border-radius:50%;
+  background:radial-gradient(circle, #FFF7D6 0%, #FFD65C 45%, rgba(255,214,92,0) 72%);
+  box-shadow:0 0 90px 30px rgba(255,214,92,.35);
+  opacity:0; transition:opacity 900ms ease;
+}
+body.weather-sunny #sunDisc, body.weather-off #sunDisc{ opacity:1; }
 .ridge{
-  position:absolute; left:-5%; width:110%; height:38%; bottom:0;
+  position:absolute; left:-5%; width:110%; height:38%; bottom:14%;
 }
 .ridge svg{width:100%;height:100%;display:block}
-.ridge.r1{ bottom:0;   opacity:.9;  z-index:3; }
-.ridge.r2{ bottom:6%;  opacity:.55; z-index:2; }
-.ridge.r3{ bottom:13%; opacity:.3;  z-index:1; }
+.ridge.r1{ bottom:14%;  opacity:.9;  z-index:3; }
+.ridge.r2{ bottom:18%;  opacity:.55; z-index:2; }
+.ridge.r3{ bottom:22%;  opacity:.3;  z-index:1; }
+.ridge polygon, .ridge rect{ transition:fill 900ms ease; }
+body.weather-sunny .ridge polygon, body.weather-off .ridge polygon,
+body.weather-sunny .ridge rect, body.weather-off .ridge rect{ fill:#4A3A10 !important; }
+body.weather-cloudy .ridge polygon, body.weather-cloudy .ridge rect{ fill:#3A424A !important; }
+body.weather-rainy .ridge polygon, body.weather-rainy .ridge rect{ fill:#2E353D !important; }
+
+#riverBand{
+  position:absolute; left:0; right:0; bottom:0; height:14%; z-index:4;
+}
+#riverBand svg{width:100%;height:100%;display:block}
 
 /* faint moisture haze that sits over the ridgelines */
 #hillscape::after{
   content:'';position:absolute; inset:0;
-  background:radial-gradient(1200px 500px at 75% 10%, rgba(63,191,166,.08), transparent 65%);
+  background:radial-gradient(1200px 500px at 75% 10%, var(--mist), transparent 65%);
 }
 
 /* ---------------------------------------------------------------------
-   WEATHER LAYER — canvas painted by app.js from live conditions.
-   Rain streaks + drifting mist, opacity/intensity driven by weather.js
+   CLOUDS — drifting shapes, count/opacity driven by live cloud-cover %
+   (weather.js). Purely decorative DOM layer, not the rain canvas.
+--------------------------------------------------------------------- */
+#cloudLayer{ position:fixed; inset:0; z-index:1; pointer-events:none; overflow:hidden; }
+.cloud-shape{
+  position:absolute; top:var(--cy,10%); left:-30%;
+  width:var(--cw,220px); height:calc(var(--cw,220px) * 0.42);
+  background:radial-gradient(ellipse at 30% 60%, rgba(255,255,255,var(--co,.8)) 0%, rgba(255,255,255,0) 70%),
+             radial-gradient(ellipse at 60% 40%, rgba(255,255,255,var(--co,.8)) 0%, rgba(255,255,255,0) 70%),
+             radial-gradient(ellipse at 45% 70%, rgba(255,255,255,var(--co,.7)) 0%, rgba(255,255,255,0) 70%);
+  filter:blur(2px);
+  animation:driftClouds var(--cd,90s) linear infinite;
+  animation-delay:var(--cdelay,0s);
+}
+@keyframes driftClouds{
+  from{ transform:translateX(0); }
+  to{ transform:translateX(160vw); }
+}
+
+/* ---------------------------------------------------------------------
+   WEATHER LAYER — rain canvas + clickable badge/menu for manual override
 --------------------------------------------------------------------- */
 #weatherCanvas{
   position:fixed; inset:0; z-index:1; pointer-events:none;
 }
 #weatherBadge{
-  position:fixed; bottom:16px; right:16px; z-index:50;
-  background:rgba(20,33,27,.85); border:1px solid var(--border);
+  position:fixed; bottom:16px; right:16px; z-index:50; cursor:pointer;
+  background:var(--panel2); border:1px solid var(--border);
   backdrop-filter:blur(6px);
   border-radius:999px; padding:7px 14px;
   font-family:var(--mono); font-size:11.5px; color:var(--dim);
   display:flex; align-items:center; gap:8px;
 }
 #weatherBadge .dot{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+#weatherMenu{
+  position:fixed; bottom:56px; right:16px; z-index:51;
+  background:var(--panel2); border:1px solid var(--border); border-radius:10px;
+  padding:10px; display:none; flex-direction:column; gap:4px; min-width:170px;
+  box-shadow:var(--shadow);
+}
+#weatherMenu.open{display:flex}
+#weatherMenu button{
+  background:transparent;border:none;color:var(--text);text-align:left;
+  padding:7px 9px;border-radius:6px;font-size:12.5px;cursor:pointer;font-family:var(--ui);
+}
+#weatherMenu button:hover{background:var(--panel)}
+#weatherMenu button.active{color:var(--accent);font-weight:700}
+#weatherMenu .menu-label{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;padding:4px 9px}
 
 #app{position:relative;z-index:2}
 
@@ -91,9 +205,10 @@ body{
 --------------------------------------------------------------------- */
 #topbar{
   border-bottom:1px solid var(--border);
-  background:rgba(16,27,22,.78);
+  background:var(--panel2);
   backdrop-filter:blur(10px);
   position:sticky; top:0; z-index:20;
+  transition:background 900ms ease;
 }
 .topbar-inner{
   max-width:1220px;margin:0 auto;padding:14px 20px;
@@ -104,7 +219,7 @@ body{
   width:36px;height:36px;border-radius:9px;
   background:linear-gradient(135deg,var(--accent),var(--accent-dim));
   display:flex;align-items:center;justify-content:center;
-  font-family:var(--display);font-weight:700;color:#052018;font-size:16px;
+  font-family:var(--display);font-weight:700;color:var(--on-accent);font-size:16px;
   box-shadow:0 0 0 1px rgba(63,191,166,.25), 0 6px 16px rgba(63,191,166,.15);
 }
 .brand-title{font-family:var(--display);font-weight:700;font-size:16px;letter-spacing:.2px}
@@ -130,6 +245,14 @@ nav.mainnav button.active{background:rgba(63,191,166,.14);color:var(--accent)}
    LAYOUT / TYPE
 --------------------------------------------------------------------- */
 main{max-width:1220px;margin:0 auto;padding:28px 20px 70px}
+#appRoot{animation:fadeSlideIn 320ms ease}
+@keyframes fadeSlideIn{
+  from{opacity:0;transform:translateY(6px)}
+  to{opacity:1;transform:translateY(0)}
+}
+.btn:active{transform:scale(.96)}
+.card.clickable:active{transform:scale(.985)}
+#checklistReferenceBody{animation:fadeSlideIn 220ms ease}
 .eyebrow{font-family:var(--mono);font-size:12px;color:var(--accent);letter-spacing:1px}
 h1.page-title{font-family:var(--display);font-weight:700;font-size:27px;margin:6px 0 0}
 h2.section-title{font-family:var(--display);font-weight:700;font-size:21px;margin:0}
@@ -181,7 +304,7 @@ h2.section-title{font-family:var(--display);font-weight:700;font-size:21px;margi
    BUTTONS / INPUTS
 --------------------------------------------------------------------- */
 .btn{
-  background:var(--accent);color:#052018;border:1px solid var(--accent);
+  background:var(--accent);color:var(--on-accent);border:1px solid var(--accent);
   border-radius:8px;padding:9px 16px;font-family:var(--ui);font-weight:700;
   font-size:13px;cursor:pointer;transition:.12s;
 }
@@ -256,7 +379,7 @@ textarea.in{resize:vertical;line-height:1.4}
 --------------------------------------------------------------------- */
 ::selection{background:rgba(63,191,166,.32)}
 ::-webkit-scrollbar{width:10px;height:10px}
-::-webkit-scrollbar-thumb{background:#26392e;border-radius:8px}
+::-webkit-scrollbar-thumb{background:var(--border-hi);border-radius:8px}
 a{color:var(--accent)}
 .dashed-divider{border-top:1px dashed var(--border);margin-top:8px;padding-top:8px}
 .section-block{margin-bottom:24px}
@@ -264,6 +387,17 @@ a{color:var(--accent)}
   font-size:11.5px;color:var(--dim);letter-spacing:1px;text-transform:uppercase;
   margin-bottom:8px;font-family:var(--mono);
 }
+.checklist-collapse-toggle{
+  width:100%;display:flex;align-items:center;gap:10px;text-align:left;
+  background:var(--panel2);border:1px solid var(--border);border-radius:10px;
+  padding:12px 16px;font-family:var(--ui);font-weight:600;font-size:13px;color:var(--text);
+  cursor:pointer;transition:.15s;
+}
+.checklist-collapse-toggle:hover{border-color:var(--accent)}
+.checklist-collapse-toggle #clRefIcon{color:var(--accent);font-size:12px}
+.equip-icon{width:15px;height:15px;display:inline-block;vertical-align:-3px;margin-right:5px;color:var(--accent)}
+.equip-icon.lg{width:26px;height:26px;vertical-align:-7px;margin-right:8px}
+.tab .equip-icon{color:inherit}
 
 /* ---------------------------------------------------------------------
    PHOTO LIGHTBOX (Google-Photos style)
