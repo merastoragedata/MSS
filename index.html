@@ -102,7 +102,7 @@
    ========================================================================== */
 
 function sec(title, items, description = "") {
-  return { id: crypto.randomUUID ? crypto.randomUUID() : String(Math.random()), title, description, items: items.map((t, i) => ({ id: (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}_${i}`), text: t })) };
+  return { title, description, items: items.map((t) => ({ text: t })) };
 }
 
 const CHECKLIST_LIBRARY = {
@@ -317,6 +317,44 @@ const CHECKLIST_LIBRARY = {
   },
 };
 
+// Assign fully DETERMINISTIC ids (position-based, not random) once, right
+// here at module load. Same equipType+category+section+item always gets the
+// same id on every single page load, forever -- this is what makes saved
+// remarks stay correctly matched to their checkpoint across sessions/devices.
+Object.keys(CHECKLIST_LIBRARY).forEach((equipType) => {
+  Object.keys(CHECKLIST_LIBRARY[equipType]).forEach((category) => {
+    CHECKLIST_LIBRARY[equipType][category].forEach((section, si) => {
+      section.id = `${equipType}_${category}_s${si}`;
+      section.items.forEach((item, ii) => {
+        item.id = `${equipType}_${category}_s${si}_i${ii}`;
+      });
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EHV SINGLE-LINE-DIAGRAM SYMBOLS — simplified, standard-inspired icons per
+// equipment type. Pure inline SVG, stroke="currentColor" so they inherit
+// whatever text/accent color is active (theme-adaptive automatically).
+// ---------------------------------------------------------------------------
+const EQUIP_ICONS = {
+  CB: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="12" y1="1" x2="12" y2="7"/><rect x="7" y="7" width="10" height="10" rx="1.5"/><line x1="12" y1="17" x2="12" y2="23"/></svg>`,
+  ISOLATOR: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="12" y1="1" x2="12" y2="9"/><line x1="12" y1="9" x2="18" y2="17"/><circle cx="12" cy="9" r="1.4" fill="currentColor"/><line x1="12" y1="17" x2="12" y2="23"/></svg>`,
+  CT: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="12" y1="1" x2="12" y2="23"/><circle cx="12" cy="12" r="5"/></svg>`,
+  LA: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="12" y1="1" x2="12" y2="8"/><rect x="9" y="8" width="6" height="8" rx="1"/><line x1="9.5" y1="16" x2="14.5" y2="8" stroke-width="1.2"/><line x1="12" y1="16" x2="12" y2="23"/></svg>`,
+  CVT: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="12" y1="1" x2="12" y2="8"/><circle cx="12" cy="13" r="5"/><path d="M9.5 13a2.5 2.5 0 015 0" stroke-width="1.2"/><line x1="12" y1="18" x2="12" y2="23"/></svg>`,
+  REACTOR: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="12" y1="1" x2="12" y2="6"/><path d="M12 6c-3 0-3 3 0 3s3 3 0 3-3 3 0 3" stroke-width="1.4"/><line x1="12" y1="18" x2="12" y2="23"/></svg>`,
+  CRP: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="4" y="4" width="16" height="16" rx="1.5"/><line x1="7" y1="9" x2="17" y2="9"/><line x1="7" y1="13" x2="17" y2="13"/><line x1="7" y1="17" x2="12" y2="17"/></svg>`,
+  WAVETRAP: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="2" y1="12" x2="6" y2="12"/><path d="M6 12c0-3 3-3 3 0s3 3 3 0 3-3 3 0 3 3 3 0" stroke-width="1.4"/><line x1="18" y1="12" x2="22" y2="12"/></svg>`,
+  ICT_PHASE: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><line x1="12" y1="1" x2="12" y2="7"/><circle cx="12" cy="10.5" r="4"/><circle cx="12" cy="16.5" r="4"/><line x1="12" y1="20.5" x2="12" y2="23"/></svg>`,
+  TERTIARY: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3 L19 17 L5 17 Z"/><line x1="12" y1="17" x2="12" y2="23"/></svg>`,
+  RRS_GENERIC: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="5" y="5" width="14" height="14" rx="2"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="12" y1="9" x2="12" y2="15"/></svg>`,
+  GENERIC33: `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="6" y="6" width="12" height="12" rx="1.5"/></svg>`,
+};
+function equipIconSVG(equipType) {
+  return EQUIP_ICONS[equipType] || EQUIP_ICONS.GENERIC33;
+}
+
 function equipTypeFromCode(code) {
   const c = code.toUpperCase();
   if (c.includes("CVT")) return "CVT";
@@ -338,7 +376,11 @@ function equipTypeFromCode(code) {
 function defaultSectionsFor(equipType, category) {
   const lib = CHECKLIST_LIBRARY[equipType] || CHECKLIST_LIBRARY.GENERIC33;
   const sections = lib[category] || [];
-  return JSON.parse(JSON.stringify(sections)).map((s) => ({ ...s, id: crypto.randomUUID(), items: s.items.map((it) => ({ ...it, id: crypto.randomUUID() })) }));
+  // Deep clone WITHOUT regenerating ids — the library's ids (assigned once,
+  // at module load, inside sec()) must stay stable across every call, or
+  // remarks saved under one call's ids become orphaned/unreadable next time
+  // this function is called fresh (no admin override saved yet).
+  return JSON.parse(JSON.stringify(sections));
 }
 
 function applicableCategories(equipType) {
@@ -1070,6 +1112,18 @@ function demoGet(action, params) {
   if (action === "getHiddenEquipment") return { codes: db.hiddenEquip[params.bayId] || [] };
   if (action === "getRolePermissions") return { perms: db.rolePerms || {} };
   if (action === "getConfig") return { config: db.config || {} };
+  if (action === "getEquipPanelBundle") {
+    return {
+      info: db.equipInfo[`${params.bayId}::${params.equipCode}`] || null,
+      records: db.records.filter((r) => r.BayID === params.bayId && r.EquipCode === params.equipCode),
+      checklistState: db.checklist[`${params.bayId}::${params.equipCode}::${params.category}`] || null,
+      muRecords: db.equipMu[`${params.bayId}::${params.equipCode}`] || [],
+      tuRecords: db.equipTu[`${params.bayId}::${params.equipCode}`] || [],
+    };
+  }
+  if (action === "getBayExtras") {
+    return { customEquipment: db.customEquip[params.bayId] || [], hiddenCodes: db.hiddenEquip[params.bayId] || [] };
+  }
   return {};
 }
 function demoPost(action, body) {
@@ -1089,14 +1143,31 @@ function demoPost(action, body) {
       if (!entry) return;
       const rec = { ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", LoggedBy: entry.loggedBy || body.user, Remarks: entry.remarks, Images: entry.images || [], GroupID: body.groupId, CreatedAt: new Date().toISOString() };
       db.records.push(rec);
-      if (entry.muRemark) db.muFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.muRemark, Selected: "FALSE", LoggedBy: entry.loggedBy || body.user });
-      if (entry.tuRemark) db.tuFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.tuRemark, Selected: "FALSE", LoggedBy: entry.loggedBy || body.user });
+      if (entry.muRemark) {
+        db.muFeed.unshift({ ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.muRemark, Selected: "FALSE", LoggedBy: entry.loggedBy || body.user });
+        const key = `${body.bayId}::${body.equipCode}`;
+        db.equipMu[key] = db.equipMu[key] || [];
+        db.equipMu[key].unshift({ ID: uid(), Date: entry.date, Remark: entry.muRemark, Images: [], LoggedBy: entry.loggedBy || body.user });
+      }
+      if (entry.tuRemark) {
+        db.tuFeed.unshift({ ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.tuRemark, Selected: "FALSE", LoggedBy: entry.loggedBy || body.user });
+        const key = `${body.bayId}::${body.equipCode}`;
+        db.equipTu[key] = db.equipTu[key] || [];
+        db.equipTu[key].unshift({ ID: uid(), Date: entry.date, Remark: entry.tuRemark, Images: [], LoggedBy: entry.loggedBy || body.user });
+      }
     });
   } else if (action === "addEquipmentRemark") {
     const store = body.kind === "TU" ? db.equipTu : db.equipMu;
     const key = `${body.bayId}::${body.equipCode}`;
     store[key] = store[key] || [];
     store[key].unshift({ ID: uid(), Date: body.date, Remark: body.remark, Images: body.images || [], LoggedBy: body.user });
+    const feed = body.kind === "TU" ? db.tuFeed : db.muFeed;
+    feed.unshift({ ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: "Adhoc", Date: body.date, PermitNo: "", Remark: body.remark, Selected: "FALSE", LoggedBy: body.user });
+  } else if (action === "addGlobalRemarkMultiBay") {
+    const feed = body.kind === "TU" ? db.tuFeed : db.muFeed;
+    (body.bayIds || []).forEach((bayId) => {
+      feed.unshift({ ID: uid(), BayID: bayId, EquipCode: "", Category: "Adhoc", Date: body.date, PermitNo: "", Remark: body.remark, Selected: "FALSE", LoggedBy: body.user });
+    });
   } else if (action === "addBay") {
     if (![...BAY_MASTER, ...db.customBays].some((b) => b.id === body.bay.id)) db.customBays.push(body.bay);
   } else if (action === "updateBayType") {
@@ -1150,6 +1221,16 @@ function demoPost(action, body) {
 // ---------------------------------------------------------------------------
 // 4) DATE / DUE HELPERS
 // ---------------------------------------------------------------------------
+// Display-only date format: "10-Jul-2026", no time. Internal storage/date
+// math stays ISO (yyyy-mm-dd) everywhere — only what's shown on screen changes.
+const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function formatDateDisplay(isoDate) {
+  if (!isoDate) return "—";
+  const d = new Date(isoDate);
+  if (isNaN(d.getTime())) return String(isoDate);
+  return `${String(d.getDate()).padStart(2,"0")}-${MONTH_ABBR[d.getMonth()]}-${d.getFullYear()}`;
+}
+
 function currentFY(d = new Date()) {
   const y = d.getFullYear(), m = d.getMonth() + 1;
   return m >= 4 ? `FY ${y}-${String(y + 1).slice(2)}` : `FY ${y - 1}-${String(y).slice(2)}`;
@@ -1169,7 +1250,7 @@ function dueStatus(category, records) {
   return { lastDate: last.Date, nextDue: nextDue.toISOString().slice(0, 10), tone };
 }
 function duePillHTML(status) {
-  const label = status.lastDate ? `Last: ${status.lastDate} · Next due: ${status.nextDue}` : "Never logged — due now";
+  const label = status.lastDate ? `Last: ${formatDateDisplay(status.lastDate)} · Next due: ${formatDateDisplay(status.nextDue)}` : "Never logged — due now";
   return `<span class="due-pill ${status.tone}"><span class="dot"></span>${label}</span>`;
 }
 
@@ -1200,10 +1281,9 @@ function normalizeBayRow(r) {
 }
 async function loadAll() {
   State.bootError = null;
-  const baysRes = await apiGet("getBays");
+  const [baysRes, usersRes] = await Promise.all([apiGet("getBays"), apiGet("getPrefillUsers")]);
   if (baysRes.__error) { State.bootError = baysRes.__error; State.bays = []; return; }
   State.bays = (baysRes.bays || []).map(normalizeBayRow);
-  const usersRes = await apiGet("getPrefillUsers");
   State.prefillUsers = usersRes.__error ? [] : (usersRes.users || []);
 }
 function findBay(id) { return State.bays.find((b) => b.id === id); }
@@ -1367,7 +1447,7 @@ async function renderMuTuHomeWidget() {
         ? `<div class="empty-note">No entries featured yet — star entries on the ${title} page to show them here.</div>`
         : list.map((r) => `
           <div class="hist-row">
-            <div class="hist-top"><span class="hist-date">${r.Date} · Bay ${r.BayID} · ${r.Category}</span><span style="color:var(--dim)">${r.LoggedBy || "—"}</span></div>
+            <div class="hist-top"><span class="hist-date">${formatDateDisplay(r.Date)} · Bay ${r.BayID} · ${r.Category}</span><span style="color:var(--dim)">${r.LoggedBy || "—"}</span></div>
             <div style="font-size:12px;margin-top:6px">${r.Remark}</div>
           </div>`).join("")}
     </div>`;
@@ -1489,7 +1569,7 @@ function renderICTDetail(groupId) {
     <h1 class="page-title" style="margin-top:10px">${g.label}</h1>
     <div class="page-sub">HV Bay ${g.hv} ${g.iv ? `· IV Bay ${g.iv}` : "· No IV pairing (spare)"} — "RRS Region" label kept exactly as specified; flag if it should read differently. ICT phase / tertiary / RRS checklists are placeholders pending your real proforma.</div>
     ${busbarSVG()}
-    <div class="tabs" id="equipTabs">${tabs.map(t => `<button class="tab ${activeCode===t.code?"active":""}" data-code="${t.code}" onclick="selectEquip('${g.id}','${t.code}')">${t.label}</button>`).join("")}</div>
+    <div class="tabs" id="equipTabs">${tabs.map(t => `<button class="tab ${activeCode===t.code?"active":""}" data-code="${t.code}" onclick="selectEquip('${g.id}','${t.code}')"><span class="equip-icon">${equipIconSVG(t.equipType)}</span>${t.label}</button>`).join("")}</div>
     <div id="equipPanel"></div>
   `;
   const activeItem = tabs.find(t => t.code === activeCode);
@@ -1503,8 +1583,9 @@ async function renderBayDetail(bayId) {
   const bay = findBay(bayId);
   if (!bay) { app.innerHTML = `<div class="empty-note">Bay not found</div>`; return; }
   const templateEquipment = equipmentForBay(bay);
-  const { items: customItems } = await apiGet("getCustomEquipment", { bayId });
-  const { codes: hiddenCodes } = await apiGet("getHiddenEquipment", { bayId });
+  const extras = await apiGet("getBayExtras", { bayId });
+  const customItems = extras.customEquipment;
+  const hiddenCodes = extras.hiddenCodes;
   const customEquipment = (customItems || []).map((c) => ({ code: c.code, label: c.label, perPhase: c.perPhase === true || c.perPhase === "TRUE", equipType: c.equipType, custom: true }));
   const hidden = new Set(hiddenCodes || []);
   const equipment = [...templateEquipment, ...customEquipment].filter((e) => !hidden.has(e.code));
@@ -1542,7 +1623,7 @@ async function renderBayDetail(bayId) {
       ${canManageStructure() ? `<button class="btn ghost sm" onclick="openAddEquipmentModal('${bay.id}')">+ Add Equipment</button>` : ""}
     </div>
     <div class="tabs" id="equipTabs">
-      ${equipment.map(e => `<button class="tab ${activeEquip===e.code?"active":""}" data-code="${e.code}" onclick="selectEquip('${bay.id}','${e.code}')">${e.code}${e.custom?" ✦":""}</button>`).join("")}
+      ${equipment.map(e => `<button class="tab ${activeEquip===e.code?"active":""}" data-code="${e.code}" onclick="selectEquip('${bay.id}','${e.code}')"><span class="equip-icon">${equipIconSVG(e.equipType || equipTypeFromCode(e.code))}</span>${e.code}${e.custom?" ✦":""}</button>`).join("")}
     </div>
 
     <div id="equipPanel"></div>
@@ -1683,23 +1764,22 @@ async function renderEquipPanel(bay, equipItem) {
   const categories = applicableCategories(equipType);
   const cat = State._catTab[code] || categories[0];
 
-  const { info } = await apiGet("getEquipmentInfo", { bayId: bay.id, equipCode: code });
-  const maintRes = await apiGet("getMaintenance", { bayId: bay.id, equipCode: code });
-  // filter client-side too, defensively (demo mode may return bay-wide records)
-  const equipRecords = (maintRes.records || []).filter((r) => !r.EquipCode || r.EquipCode === code);
+  document.getElementById("equipPanel").innerHTML = `<div class="empty-note">Loading ${code}…</div>`;
+  const bundle = await apiGet("getEquipPanelBundle", { bayId: bay.id, equipCode: code, category: cat });
 
-  let stateSections = await apiGet("getChecklistState", { bayId: bay.id, equipCode: code, category: cat });
-  let sections = stateSections.state || defaultSectionsFor(equipType, cat);
+  const info = bundle.info;
+  const equipRecords = (bundle.records || []).filter((r) => !r.EquipCode || r.EquipCode === code);
+  const sections = bundle.checklistState || defaultSectionsFor(equipType, cat);
   State._currentSections = sections;
   State._currentEquip = { bay, equipItem, equipType, cat };
 
-  const muRes = await apiGet("getEquipmentRemarks", { kind: "MU", bayId: bay.id, equipCode: code });
-  const tuRes = await apiGet("getEquipmentRemarks", { kind: "TU", bayId: bay.id, equipCode: code });
+  const muRes = { records: bundle.muRecords || [] };
+  const tuRes = { records: bundle.tuRecords || [] };
 
   document.getElementById("equipPanel").innerHTML = `
     <div class="card" style="margin-bottom:16px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-family:var(--display);font-weight:700;font-size:15px">${code} — ${equipItem.label}</div>
+        <div style="font-family:var(--display);font-weight:700;font-size:15px;display:flex;align-items:center"><span class="equip-icon lg">${equipIconSVG(equipType)}</span>${code} — ${equipItem.label}</div>
         <div style="display:flex;gap:6px">
           <button class="btn ghost sm" onclick="editEquipInfo('${bay.id}','${code}', ${equipItem.perPhase})">edit info</button>
           ${canManageStructure() && !bay.isICT && equipItem.custom ? `<button class="btn ghost sm" onclick="editCustomEquipmentPrompt('${bay.id}','${code}','${(equipItem.label||"").replace(/'/g,"\\'")}')">edit label</button>` : ""}
@@ -1717,13 +1797,9 @@ async function renderEquipPanel(bay, equipItem) {
     </div>
     <div style="margin:14px 0">${duePillHTML(dueStatus(cat, equipRecords))}</div>
 
-    <div class="type-label" style="display:flex;justify-content:space-between;align-items:center">
-      <span>${cat} Checklist</span>
-      ${isAdmin() ? `<button class="btn ghost sm" onclick="openChecklistManager()">⚙ Add / Edit Checkpoints</button>` : ""}
-    </div>
-    <div id="sectionsRoot">${renderSectionsReadOnly(sections)}</div>
+    <div style="margin:14px 0">${duePillHTML(dueStatus(cat, equipRecords))}</div>
 
-    <div class="section-block" style="margin-top:26px">
+    <div class="section-block">
       <div class="type-label">Recent ${cat} entries</div>
       <div id="equipHistory">${renderEquipHistory(equipRecords, cat, bay.id, code)}</div>
     </div>
@@ -1744,7 +1820,22 @@ async function renderEquipPanel(bay, equipItem) {
         <div id="tuList">${renderRemarkList(tuRes.records || [], "TU", bay.id, code)}</div>
       </div>
     </div>
+
+    <div class="section-block" style="margin-top:30px">
+      <button class="checklist-collapse-toggle" onclick="toggleChecklistReference()">
+        <span id="clRefIcon">▸</span> ${cat} Checklist Reference (${sections.reduce((n,s)=>n+s.items.length,0)} checkpoints across ${sections.length} sections)
+        ${isAdmin() ? `<span class="btn ghost sm" style="margin-left:auto" onclick="event.stopPropagation();openChecklistManager()">⚙ Add / Edit Checkpoints</span>` : ""}
+      </button>
+      <div id="checklistReferenceBody" style="display:none;margin-top:12px">${renderSectionsReadOnly(sections)}</div>
+    </div>
   `;
+}
+function toggleChecklistReference() {
+  const body = document.getElementById("checklistReferenceBody");
+  const icon = document.getElementById("clRefIcon");
+  const open = body.style.display !== "none";
+  body.style.display = open ? "none" : "block";
+  icon.textContent = open ? "▸" : "▾";
 }
 
 function renderEquipInfoDisplay(info, perPhase) {
@@ -2031,13 +2122,16 @@ function renderEquipHistory(records, category, bayId, equipCode) {
     const images = r.Images || [];
     return `<div class="hist-row">
       <div class="hist-top">
-        <span class="hist-date">${r.Date}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
+        <span class="hist-date">${formatDateDisplay(r.Date)}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
         <div style="display:flex;align-items:center;gap:8px">
           <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
           ${isAdmin() ? `<button class="btn danger sm" onclick="confirmDeleteLogEntry('${r.ID}','${bayId}','${equipCode}')">delete</button>` : ""}
         </div>
       </div>
-      <div class="hist-remarks">${Object.entries(remarks).filter(([,v])=>v).map(([k,v]) => `<div class="hist-remark"><b>${k}:</b> ${v}</div>`).join("")}</div>
+      <div class="hist-remarks">${Object.entries(remarks).filter(([,v])=>v && (typeof v === "string" ? v : v.value)).map(([k,v]) => {
+        const isObj = v && typeof v === "object";
+        return `<div class="hist-remark"><b>${isObj ? v.text : k}:</b> ${isObj ? v.value : v}</div>`;
+      }).join("")}</div>
       ${renderSavedPhotoGrid(images)}
     </div>`;
   }).join("");
@@ -2063,7 +2157,7 @@ function renderRemarkList(records, kind, bayId, equipCode) {
   if (!list.length) return `<div class="empty-note">No remarks yet.</div>`;
   return list.map((r) => `<div class="hist-row">
     <div class="hist-top">
-      <span class="hist-date">${r.Date}</span>
+      <span class="hist-date">${formatDateDisplay(r.Date)}</span>
       <div style="display:flex;align-items:center;gap:8px">
         <span style="color:var(--dim)">${r.LoggedBy||"—"}</span>
         ${isAdmin() ? `
@@ -2118,7 +2212,7 @@ function addEquipRemarkPrompt(kind, bayId, equipCode) {
   const root = document.getElementById("modalRoot");
   root.innerHTML = modalWrap(`
     <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Add ${kind === "MU" ? "Maintenance Unit" : "Testing Unit"} Remark</div>
-    <label class="fld"><span>Date</span><input class="in mono" id="er_date" value="${new Date().toISOString().slice(0,10)}"/></label>
+    <label class="fld"><span>Date</span><input type="date" class="in mono" id="er_date" value="${new Date().toISOString().slice(0,10)}"/></label>
     <label class="fld"><span>Remark</span><textarea class="in" id="er_remark" rows="3" placeholder="Describe the work done…"></textarea></label>
     ${renderPhotoPicker("er_photos_input")}
     <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:10px">
@@ -2172,7 +2266,7 @@ async function renderCascadeStage() {
   root.innerHTML = modalWrap(`
     <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:4px">${cat} Maintenance — ${Cascade.equipCode}</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin:10px 0 14px">
-      <label class="fld"><span>Date</span><input class="in mono" id="ce_date" value="${entry.date}"/></label>
+      <label class="fld"><span>Date</span><input type="date" class="in mono" id="ce_date" value="${entry.date}"/></label>
       <label class="fld"><span>Permit No.</span><input class="in mono" id="ce_permit" placeholder="e.g. PTW/2026/0142"/></label>
       <label class="fld"><span>Logged by</span><input class="in" id="ce_loggedBy" placeholder="Name / designation"/></label>
     </div>
@@ -2185,7 +2279,7 @@ async function renderCascadeStage() {
             <div class="checklist-item">
               <div style="font-size:12.5px;margin-bottom:6px">${it.text}</div>
               <div class="row">
-                <textarea class="in" rows="1" data-cp="${it.id}" placeholder="Remark…">${prefill ? pickRemark(it.text) : ""}</textarea>
+                <textarea class="in" rows="1" data-cp="${it.id}" data-cp-text="${(it.text||"").replace(/"/g,'&quot;')}" placeholder="Remark…">${prefill ? pickRemark(it.text) : ""}</textarea>
                 ${prefill ? `<button class="btn ghost sm" onclick="prefillCascadeCP('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
               </div>
             </div>
@@ -2209,7 +2303,9 @@ function prefillCascadeCP(id, text) {
 }
 async function collectCascadeForm() {
   const remarks = {};
-  document.querySelectorAll("#ce_sections textarea[data-cp]").forEach((t) => { remarks[t.dataset.cp] = t.value; });
+  document.querySelectorAll("#ce_sections textarea[data-cp]").forEach((t) => {
+    remarks[t.dataset.cp] = { text: t.dataset.cpText || t.dataset.cp, value: t.value };
+  });
   const images = await commitStagedPhotos();
   return {
     date: document.getElementById("ce_date").value,
@@ -2262,15 +2358,20 @@ async function renderGlobalRemarks(kind) {
   const { records } = await apiGet("getGlobalRemarks", { kind });
   const list = (records || []).slice().sort((a,b) => new Date(b.Date) - new Date(a.Date));
   app.innerHTML = `
-    <h1 class="page-title">${kind === "MU" ? "Maintenance Unit Remarks" : "Testing Unit Remarks"}</h1>
-    <div class="page-sub">Station-wide feed — auto-punched from bay-level Monthly/Quarterly/Annual logging when a ${kind} remark is entered. Equipment-level ad hoc ${kind} notes live on each equipment's own tab and aren't duplicated here. Star an entry to feature it in the Home page ${kind} widget (top 10 most recent starred entries).</div>
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
+      <div>
+        <h1 class="page-title">${kind === "MU" ? "Maintenance Unit Remarks" : "Testing Unit Remarks"}</h1>
+        <div class="page-sub">Station-wide feed — bidirectional: punched here automatically from bay-level M/Q/A logging AND from any equipment's own ${kind} section, and vice versa. Star an entry to feature it in the Home page ${kind} widget (top 10 most recent starred entries).</div>
+      </div>
+      <button class="btn" onclick="openMultiBayRemarkModal('${kind}')">+ Add Remark</button>
+    </div>
     ${busbarSVG()}
     ${list.length === 0 ? `<div class="empty-note">No ${kind} remarks logged yet.</div>` : list.map((r) => {
       const selected = r.Selected === true || r.Selected === "TRUE";
       return `
       <div class="hist-row">
         <div class="hist-top">
-          <span class="hist-date">${r.Date} · Bay ${r.BayID} · ${r.Category}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
+          <span class="hist-date">${formatDateDisplay(r.Date)} · Bay ${r.BayID}${r.EquipCode ? ` (${r.EquipCode})` : ""} · ${r.Category}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
           <div style="display:flex;align-items:center;gap:10px">
             <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
             <button class="btn ${selected ? "" : "ghost"} sm" onclick="toggleRemarkStar('${kind}','${r.ID}', ${!selected})">${selected ? "★ Featured" : "☆ Feature on Home"}</button>
@@ -2323,6 +2424,42 @@ async function doDeleteGlobalRemark(kind, id) {
   closeModal();
   renderGlobalRemarks(kind);
 }
+function openMultiBayRemarkModal(kind) {
+  const root = document.getElementById("modalRoot");
+  const groups = [["400", "400 kV"], ["220", "220 kV"], ["33", "33 kV"]];
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Add ${kind === "MU" ? "Maintenance" : "Testing"} Unit Remark</div>
+    <label class="fld"><span>Date</span><input type="date" class="in mono" id="mbr_date" value="${new Date().toISOString().slice(0,10)}"/></label>
+    <label class="fld"><span>Remark</span><textarea class="in" id="mbr_remark" rows="3" placeholder="Describe the work done…"></textarea></label>
+    <label class="fld"><span>Apply to bay(s) — check one or more</span></label>
+    <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:14px">
+      ${groups.map(([v, label]) => `
+        <div style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin:8px 0 4px">${label}</div>
+        ${State.bays.filter(b => b.voltage === v).map(b => `
+          <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;padding:3px 0">
+            <input type="checkbox" class="mbr-bay-cb" value="${b.id}"/> ${b.id} — ${b.name}
+          </label>
+        `).join("")}
+      `).join("")}
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" id="mbr_saveBtn" onclick="submitMultiBayRemark('${kind}')">Save</button>
+    </div>
+  `);
+}
+async function submitMultiBayRemark(kind) {
+  const date = document.getElementById("mbr_date").value;
+  const remark = document.getElementById("mbr_remark").value.trim();
+  const bayIds = Array.from(document.querySelectorAll(".mbr-bay-cb:checked")).map((cb) => cb.value);
+  if (!remark || !bayIds.length) { alert("Enter a remark and check at least one bay."); return; }
+  const btn = document.getElementById("mbr_saveBtn");
+  btn.disabled = true; btn.textContent = "Saving…";
+  await apiPost("addGlobalRemarkMultiBay", { kind, bayIds, date, remark, user: State.currentUser });
+  closeModal();
+  renderGlobalRemarks(kind);
+}
+
 async function toggleRemarkStar(kind, id, selected) {
   await apiPost("toggleRemarkSelected", { kind, id, selected });
   renderGlobalRemarks(kind);
@@ -2489,9 +2626,8 @@ document.getElementById("roleSelect").addEventListener("change", (e) => { State.
 document.getElementById("userNameInput").addEventListener("change", (e) => { State.currentUser = e.target.value.trim() || "Guest User"; });
 (async function boot() {
   try {
-    await loadAll();
+    const [, permsRes] = await Promise.all([loadAll(), apiGet("getRolePermissions")]);
     if (State.bootError) { renderBootError(State.bootError); return; }
-    const permsRes = await apiGet("getRolePermissions");
     const perms = permsRes.__error ? {} : (permsRes.perms || {});
     State.muFullAccess = perms.MU_FULL_ACCESS === "true";
     State.tuFullAccess = perms.TU_FULL_ACCESS === "true";
