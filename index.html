@@ -10,30 +10,52 @@
 </head>
 <body>
 
-  <!-- Hill silhouette backdrop (Sahyadri ghats motif) -->
+  <!-- Bhima riverside backdrop at Siddhatek, Karjat (Ahmednagar) — stylised,
+       not a photo: distant hills, a temple-spire silhouette (nod to
+       Siddhatek Ganpati Mandir), the river band, and a sun disc that's only
+       shown in sunny mode. Recolored per weather by weather-* body classes. -->
   <div id="hillscape">
+    <div id="sunDisc"></div>
     <div class="ridge r3">
       <svg viewBox="0 0 1440 300" preserveAspectRatio="none">
-        <polygon points="0,300 0,180 120,140 260,190 400,110 560,170 720,100 900,175 1080,120 1240,180 1440,140 1440,300"
-                 fill="#152420"/>
+        <polygon points="0,300 0,180 120,140 260,190 400,110 560,170 720,100 900,175 1080,120 1240,180 1440,140 1440,300" fill="#152420"/>
       </svg>
     </div>
     <div class="ridge r2">
       <svg viewBox="0 0 1440 260" preserveAspectRatio="none">
-        <polygon points="0,260 0,150 150,190 300,120 460,175 620,100 800,165 980,110 1160,170 1320,130 1440,160 1440,260"
-                 fill="#101F1A"/>
+        <polygon points="0,260 0,150 150,190 300,120 460,175 620,100 800,165 980,110 1160,170 1320,130 1440,160 1440,260" fill="#101F1A"/>
+        <!-- temple spire silhouette, small, non-literal -->
+        <polygon points="1010,120 1018,80 1026,120" fill="#101F1A"/>
+        <rect x="1012" y="118" width="12" height="10" fill="#101F1A"/>
       </svg>
     </div>
     <div class="ridge r1">
       <svg viewBox="0 0 1440 220" preserveAspectRatio="none">
-        <polygon points="0,220 0,170 140,200 320,150 500,195 680,140 860,190 1040,150 1220,195 1440,160 1440,220"
-                 fill="#0B1613"/>
+        <polygon points="0,220 0,170 140,200 320,150 500,195 680,140 860,190 1040,150 1220,195 1440,160 1440,220" fill="#0B1613"/>
+      </svg>
+    </div>
+    <div id="riverBand">
+      <svg viewBox="0 0 1440 160" preserveAspectRatio="none">
+        <rect x="0" y="0" width="1440" height="160" fill="url(#riverGrad)"/>
+        <path d="M0,40 Q 200,20 400,40 T 800,40 T 1200,40 T 1440,40" stroke="rgba(255,255,255,0.18)" stroke-width="2" fill="none"/>
+        <path d="M0,80 Q 200,60 400,80 T 800,80 T 1200,80 T 1440,80" stroke="rgba(255,255,255,0.12)" stroke-width="2" fill="none"/>
+        <path d="M0,120 Q 200,100 400,120 T 800,120 T 1200,120 T 1440,120" stroke="rgba(255,255,255,0.10)" stroke-width="2" fill="none"/>
+        <defs>
+          <linearGradient id="riverGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stop-color="var(--river-top)"/>
+            <stop offset="100%" stop-color="var(--river-bottom)"/>
+          </linearGradient>
+        </defs>
       </svg>
     </div>
   </div>
+  <div id="cloudLayer"></div>
 
   <canvas id="weatherCanvas"></canvas>
-  <div id="weatherBadge"><span class="dot"></span>Loading weather…</div>
+  <div id="weatherBadge" onclick="toggleWeatherMenu()">
+    <span class="dot"></span><span id="weatherBadgeText">Loading weather…</span>
+  </div>
+  <div id="weatherMenu"></div>
 
   <div id="app">
     <div id="topbar">
@@ -424,76 +446,128 @@ function equipmentForBay(bay) {
   </script>
   <script>
 /* =============================================================================
-   WEATHER LAYER — fetches live conditions for Karjat (Open-Meteo, no API key)
-   and paints rain / mist on #weatherCanvas accordingly. This is what makes
-   "rain on-site = heavy rain on the website" actually true, not simulated.
-   Falls back to a gentle default mist if the weather fetch fails (e.g. no
-   network in this sandbox) so the site still looks alive.
+   WEATHER + THEME SYSTEM
+   Fetches live conditions for Karjat/Siddhatek (Open-Meteo, no API key) and
+   drives the whole site's palette from it: sunny (bright yellow, black
+   text), cloudy (dims with real cloud-cover %, black text), rainy (grey,
+   light text, rain streaks on #weatherCanvas — the effect from before, kept
+   as-is). A manual per-browser override is available from the weather
+   badge; admin can disable effects site-wide from the Admin page (falls
+   back to "sunny, very light cloud").
    ========================================================================== */
 
-const WeatherFX = {
-  canvas: null, ctx: null, w: 0, h: 0,
-  mode: "clear",       // clear | cloudy | fog | drizzle | rain | storm
-  intensity: 0,         // 0..1
-  drops: [],
-  mistBlobs: [],
-  raf: null,
-};
+const WeatherFX = { canvas: null, ctx: null, w: 0, h: 0, mode: "sunny", intensity: 0, drops: [], raf: null };
+const WeatherState = { effectsEnabled: true, manualMode: "auto", liveMode: "sunny", liveCloudPct: 10, liveTemp: null };
 
-function classifyWeatherCode(code) {
-  if ([0, 1].includes(code)) return { mode: "clear", intensity: 0 };
-  if ([2, 3].includes(code)) return { mode: "cloudy", intensity: 0.15 };
-  if ([45, 48].includes(code)) return { mode: "fog", intensity: 0.5 };
-  if ([51, 53, 55, 56, 57].includes(code)) return { mode: "drizzle", intensity: 0.35 };
-  if ([61, 63, 80, 81].includes(code)) return { mode: "rain", intensity: 0.65 };
-  if ([65, 66, 67, 82, 95, 96, 99].includes(code)) return { mode: "storm", intensity: 1 };
-  return { mode: "cloudy", intensity: 0.15 };
+const MODE_LABELS = { auto: "Auto (live)", sunny: "Sunny", cloudy: "Cloudy", rainy: "Rainy" };
+
+function classifyWeatherCode(code, cloudPct) {
+  if ([61, 63, 65, 66, 67, 80, 81, 82, 95, 96, 99].includes(code)) return { mode: "rainy" };
+  if ([51, 53, 55, 56, 57].includes(code)) return { mode: "rainy" }; // drizzle still reads as "rainy" theme-wise
+  if (cloudPct >= 35 || [2, 3, 45, 48].includes(code)) return { mode: "cloudy" };
+  return { mode: "sunny" };
 }
 
 async function fetchKarjatWeather() {
   try {
-    const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.LAT}&longitude=${CONFIG.LON}&current=temperature_2m,precipitation,weather_code&timezone=auto`;
+    const url = `https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.LAT}&longitude=${CONFIG.LON}&current=temperature_2m,precipitation,weather_code,cloud_cover&timezone=auto`;
     const res = await fetch(url);
     const data = await res.json();
     const code = data.current.weather_code;
+    const cloudPct = data.current.cloud_cover ?? 10;
     const temp = data.current.temperature_2m;
-    const { mode, intensity } = classifyWeatherCode(code);
-    return { mode, intensity, temp, ok: true };
+    const { mode } = classifyWeatherCode(code, cloudPct);
+    return { mode, cloudPct, temp, ok: true };
   } catch (e) {
-    return { mode: "cloudy", intensity: 0.15, temp: null, ok: false };
+    return { mode: "sunny", cloudPct: 10, temp: null, ok: false };
   }
 }
 
-function initWeather() {
+async function initWeather() {
   const canvas = document.getElementById("weatherCanvas");
   WeatherFX.canvas = canvas;
   WeatherFX.ctx = canvas.getContext("2d");
   resizeWeatherCanvas();
   window.addEventListener("resize", resizeWeatherCanvas);
 
-  fetchKarjatWeather().then((w) => {
-    WeatherFX.mode = w.mode;
-    WeatherFX.intensity = w.intensity;
-    seedParticles();
-    updateWeatherBadge(w);
-    loopWeather();
-  });
+  WeatherState.manualMode = localStorage.getItem("karjat_weather_override") || "auto";
 
-  // refresh conditions every 15 min
+  const { config } = await apiGet("getConfig");
+  WeatherState.effectsEnabled = config && config.WEATHER_EFFECTS_ENABLED === "false" ? false : true;
+
+  const w = await fetchKarjatWeather();
+  WeatherState.liveMode = w.mode;
+  WeatherState.liveCloudPct = w.cloudPct;
+  WeatherState.liveTemp = w.temp;
+
+  applyEffectiveWeather();
+  loopWeather();
+
   setInterval(async () => {
-    const w = await fetchKarjatWeather();
-    WeatherFX.mode = w.mode;
-    WeatherFX.intensity = w.intensity;
-    seedParticles();
-    updateWeatherBadge(w);
+    const w2 = await fetchKarjatWeather();
+    WeatherState.liveMode = w2.mode;
+    WeatherState.liveCloudPct = w2.cloudPct;
+    WeatherState.liveTemp = w2.temp;
+    applyEffectiveWeather();
   }, 15 * 60 * 1000);
 }
 
-function updateWeatherBadge(w) {
-  const el = document.getElementById("weatherBadge");
+// Resolves manual override + admin enable/disable + live conditions into
+// one effective mode/cloudFactor, then applies it.
+function applyEffectiveWeather() {
+  let mode, cloudPct;
+  if (!WeatherState.effectsEnabled) {
+    mode = "sunny"; cloudPct = 8; // "sunny with clouds very less"
+  } else if (WeatherState.manualMode !== "auto") {
+    mode = WeatherState.manualMode;
+    cloudPct = mode === "cloudy" ? Math.max(WeatherState.liveCloudPct, 45) : mode === "sunny" ? 10 : 70;
+  } else {
+    mode = WeatherState.liveMode;
+    cloudPct = WeatherState.liveCloudPct;
+  }
+  applyWeatherTheme(mode, cloudPct);
+  updateWeatherBadge(mode, cloudPct);
+  renderClouds(mode === "sunny" ? cloudPct * 0.4 : cloudPct);
+  seedRainParticles(mode);
+  renderWeatherMenu();
+}
+
+function hexLerp(a, b, t) {
+  const pa = [1, 3, 5].map((i) => parseInt(a.slice(i, i + 2), 16));
+  const pb = [1, 3, 5].map((i) => parseInt(b.slice(i, i + 2), 16));
+  const c = pa.map((v, i) => Math.round(v + (pb[i] - v) * t));
+  return `#${c.map((v) => v.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function applyWeatherTheme(mode, cloudPct) {
+  const body = document.body;
+  body.classList.remove("weather-sunny", "weather-cloudy", "weather-rainy", "weather-off");
+  if (!WeatherState.effectsEnabled) { body.classList.add("weather-off"); WeatherFX.mode = "sunny"; WeatherFX.intensity = 0; return; }
+  body.classList.add(`weather-${mode}`);
+
+  if (mode === "cloudy") {
+    // Interpolate bg/river between light-overcast and heavy-overcast based on real cloud %
+    const t = Math.min(1, Math.max(0, (cloudPct - 35) / 65));
+    document.documentElement.style.setProperty("--bg", hexLerp("#CBD5DB", "#6E7882", t));
+    document.documentElement.style.setProperty("--bg2", hexLerp("#DCE3E7", "#828C96", t));
+    document.documentElement.style.setProperty("--river-top", hexLerp("#A8BAC3", "#6B7D87", t));
+    document.documentElement.style.setProperty("--river-bottom", hexLerp("#63808A", "#3E4E56", t));
+  } else {
+    // sunny/rainy/off use their fixed body-class palette from styles.css —
+    // clear any inline overrides left over from a previous cloudy state
+    ["--bg", "--bg2", "--river-top", "--river-bottom"].forEach((v) => document.documentElement.style.removeProperty(v));
+  }
+
+  WeatherFX.mode = mode;
+  WeatherFX.intensity = mode === "rainy" ? 0.75 : 0;
+}
+
+function updateWeatherBadge(mode, cloudPct) {
+  const el = document.getElementById("weatherBadgeText");
   if (!el) return;
-  const labels = { clear: "Clear", cloudy: "Cloudy", fog: "Misty ridge", drizzle: "Light rain", rain: "Rain", storm: "Heavy rain" };
-  el.innerHTML = `<span class="dot"></span>Karjat · ${labels[w.mode] || "—"}${w.temp != null ? ` · ${Math.round(w.temp)}°C` : ""}`;
+  const labels = { sunny: "Sunny", cloudy: "Cloudy", rainy: "Rain" };
+  const src = WeatherState.manualMode !== "auto" ? " (manual)" : "";
+  el.textContent = `Siddhatek · ${labels[mode] || "—"}${WeatherState.liveTemp != null && WeatherState.manualMode === "auto" ? ` · ${Math.round(WeatherState.liveTemp)}°C` : ""}${src}`;
 }
 
 function resizeWeatherCanvas() {
@@ -502,42 +576,23 @@ function resizeWeatherCanvas() {
   WeatherFX.h = c.height = window.innerHeight;
 }
 
-function seedParticles() {
-  const { mode, intensity, w, h } = { ...WeatherFX, w: WeatherFX.w, h: WeatherFX.h };
-  const dropCount = mode === "storm" ? 220 : mode === "rain" ? 140 : mode === "drizzle" ? 60 : 0;
-  WeatherFX.drops = Array.from({ length: dropCount }, () => ({
-    x: Math.random() * w,
-    y: Math.random() * h,
-    len: 10 + Math.random() * (mode === "storm" ? 22 : 14),
-    speed: (mode === "storm" ? 11 : mode === "rain" ? 8 : 5) + Math.random() * 4,
-    drift: mode === "storm" ? 2.4 : 1.1,
-  }));
-  const mistCount = (mode === "fog" ? 10 : mode === "cloudy" ? 4 : 2);
-  WeatherFX.mistBlobs = Array.from({ length: mistCount }, () => ({
-    x: Math.random() * w, y: h * (0.55 + Math.random() * 0.4),
-    r: 180 + Math.random() * 220, speed: 0.15 + Math.random() * 0.2,
+function seedRainParticles(mode) {
+  const count = mode === "rainy" ? 160 : 0;
+  WeatherFX.drops = Array.from({ length: count }, () => ({
+    x: Math.random() * WeatherFX.w,
+    y: Math.random() * WeatherFX.h,
+    len: 10 + Math.random() * 18,
+    speed: 8 + Math.random() * 5,
+    drift: 1.6,
   }));
 }
 
 function loopWeather() {
-  const { ctx, w, h, mode, intensity } = WeatherFX;
+  const { ctx, w, h, mode } = WeatherFX;
   ctx.clearRect(0, 0, w, h);
-
-  // drifting mist (present in fog/cloudy/rain — a wet hill station is rarely bone-dry-clear)
-  WeatherFX.mistBlobs.forEach((m) => {
-    m.x += m.speed;
-    if (m.x - m.r > w) m.x = -m.r;
-    const grad = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, m.r);
-    grad.addColorStop(0, `rgba(150,190,175,${0.05 + intensity * 0.04})`);
-    grad.addColorStop(1, "rgba(150,190,175,0)");
-    ctx.fillStyle = grad;
-    ctx.beginPath(); ctx.arc(m.x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
-  });
-
-  // rain streaks
   if (WeatherFX.drops.length) {
-    ctx.strokeStyle = mode === "storm" ? "rgba(180,215,230,0.55)" : "rgba(180,215,230,0.38)";
-    ctx.lineWidth = mode === "storm" ? 1.6 : 1.1;
+    ctx.strokeStyle = "rgba(200,225,235,0.5)";
+    ctx.lineWidth = 1.3;
     WeatherFX.drops.forEach((d) => {
       ctx.beginPath();
       ctx.moveTo(d.x, d.y);
@@ -547,8 +602,55 @@ function loopWeather() {
       if (d.y > h) { d.y = -d.len; d.x = Math.random() * w; }
     });
   }
-
   WeatherFX.raf = requestAnimationFrame(loopWeather);
+}
+
+// ---------------------------------------------------------------------------
+// CLOUDS — decorative drifting shapes, count/opacity from cloud %
+// ---------------------------------------------------------------------------
+function renderClouds(cloudPct) {
+  const layer = document.getElementById("cloudLayer");
+  if (!layer) return;
+  const count = cloudPct < 15 ? 0 : cloudPct < 35 ? 2 : cloudPct < 60 ? 4 : cloudPct < 80 ? 6 : 8;
+  layer.innerHTML = Array.from({ length: count }, (_, i) => {
+    const cw = 160 + Math.random() * 200;
+    const cy = 4 + Math.random() * 30;
+    const co = 0.35 + Math.random() * 0.35;
+    const cd = 70 + Math.random() * 60;
+    const cdelay = -Math.random() * cd;
+    return `<div class="cloud-shape" style="--cw:${cw.toFixed(0)}px;--cy:${cy.toFixed(0)}%;--co:${co.toFixed(2)};--cd:${cd.toFixed(0)}s;--cdelay:${cdelay.toFixed(0)}s"></div>`;
+  }).join("");
+}
+
+// ---------------------------------------------------------------------------
+// MANUAL OVERRIDE MENU (per-browser, localStorage — not site-wide)
+// ---------------------------------------------------------------------------
+function toggleWeatherMenu() {
+  const menu = document.getElementById("weatherMenu");
+  menu.classList.toggle("open");
+}
+function setManualWeather(mode) {
+  WeatherState.manualMode = mode;
+  localStorage.setItem("karjat_weather_override", mode);
+  applyEffectiveWeather();
+  document.getElementById("weatherMenu").classList.remove("open");
+}
+function renderWeatherMenu() {
+  const menu = document.getElementById("weatherMenu");
+  if (!menu) return;
+  const opts = ["auto", "sunny", "cloudy", "rainy"];
+  menu.innerHTML = `
+    <div class="menu-label">Weather (this device)</div>
+    ${opts.map((o) => `<button class="${WeatherState.manualMode === o ? "active" : ""}" onclick="setManualWeather('${o}')">${MODE_LABELS[o]}</button>`).join("")}
+    ${!WeatherState.effectsEnabled ? `<div class="menu-label" style="color:var(--red)">Effects disabled site-wide by admin</div>` : ""}
+  `;
+}
+
+// Called from the Admin page toggle
+async function setWeatherEffectsEnabled(enabled) {
+  WeatherState.effectsEnabled = enabled;
+  await apiPost("setConfig", { config: { WEATHER_EFFECTS_ENABLED: String(enabled) } });
+  applyEffectiveWeather();
 }
 
   </script>
@@ -731,7 +833,7 @@ async function saveCroppedImage() {
     const res = await apiPost("uploadImage", { filename: `edited_${Date.now()}.jpg`, mimeType: "image/jpeg", base64 });
     if (res.imageUrl) {
       msg.textContent = "Saved as a new photo. Reopen the record to see it in its gallery (edits don't overwrite originals).";
-      msg.style.color = "var(--good, #5FD08A)";
+      msg.style.color = "var(--green)";
     } else {
       throw new Error("upload failed");
     }
@@ -756,8 +858,10 @@ const CONFIG = {
   API_URL: "https://script.google.com/macros/s/AKfycbzBcjIU0LxzQUA96XOLGSx3ThxNrfb_qw1W0lSidJPSkmGAeG7EwbzXr66mUwlyuo4D/exec",
   SUBSTATION_NAME: "KARJAT 400/220/33 kV S/S",
   SS_CODE: "J966",
-  LAT: 18.9107,
-  LON: 73.3260,
+  // Karjat Taluka, Ahmednagar district — near Siddhatek (Ganpati Mandir) &
+  // Deulwadi, on the banks of the Bhima river. NOT the Karjat near Mumbai.
+  LAT: 18.4559,
+  LON: 74.7273,
   // Once you merge this portal with your SLD/equipment-list site, set these
   // and the "Draw/View SLD" button + Station SLD page will fetch from there
   // instead of the local freehand fallback.
@@ -905,7 +1009,7 @@ function pickRemark(checkpointText) {
 const DemoDB = {
   key: "karjat_portal_demo_v3",
   read() {
-    const blank = { bays: {}, customBays: [], records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {}, customEquip: {}, hiddenEquip: {}, rolePerms: {} };
+    const blank = { bays: {}, customBays: [], records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {}, customEquip: {}, hiddenEquip: {}, rolePerms: {}, config: {} };
     try { return { ...blank, ...(JSON.parse(localStorage.getItem(this.key)) || {}) }; }
     catch { return blank; }
   },
@@ -915,18 +1019,38 @@ function uid() { return crypto.randomUUID ? crypto.randomUUID() : String(Date.no
 
 async function apiGet(action, params = {}) {
   if (DEMO_MODE) return demoGet(action, params);
-  const qs = new URLSearchParams({ action, ...params }).toString();
-  const res = await fetch(`${CONFIG.API_URL}?${qs}`);
-  return res.json();
+  try {
+    const qs = new URLSearchParams({ action, ...params }).toString();
+    const res = await fetch(`${CONFIG.API_URL}?${qs}`);
+    if (!res.ok) return { __error: `HTTP ${res.status} from API (action=${action})` };
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { __error: `API did not return valid JSON for action=${action}. First 200 chars: ${text.slice(0, 200)}` };
+    }
+  } catch (e) {
+    return { __error: `Network/fetch error for action=${action}: ${e.message || e}` };
+  }
 }
 async function apiPost(action, body = {}) {
   if (DEMO_MODE) return demoPost(action, body);
-  const res = await fetch(CONFIG.API_URL, {
-    method: "POST",
-    headers: { "Content-Type": "text/plain;charset=utf-8" },
-    body: JSON.stringify({ action, ...body }),
-  });
-  return res.json();
+  try {
+    const res = await fetch(CONFIG.API_URL, {
+      method: "POST",
+      headers: { "Content-Type": "text/plain;charset=utf-8" },
+      body: JSON.stringify({ action, ...body }),
+    });
+    if (!res.ok) return { __error: `HTTP ${res.status} from API (action=${action})` };
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch {
+      return { __error: `API did not return valid JSON for action=${action}. First 200 chars: ${text.slice(0, 200)}` };
+    }
+  } catch (e) {
+    return { __error: `Network/fetch error for action=${action}: ${e.message || e}` };
+  }
 }
 
 function demoGet(action, params) {
@@ -945,6 +1069,7 @@ function demoGet(action, params) {
   if (action === "getCustomEquipment") return { items: db.customEquip[params.bayId] || [] };
   if (action === "getHiddenEquipment") return { codes: db.hiddenEquip[params.bayId] || [] };
   if (action === "getRolePermissions") return { perms: db.rolePerms || {} };
+  if (action === "getConfig") return { config: db.config || {} };
   return {};
 }
 function demoPost(action, body) {
@@ -964,8 +1089,8 @@ function demoPost(action, body) {
       if (!entry) return;
       const rec = { ID: uid(), BayID: body.bayId, EquipCode: body.equipCode, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", LoggedBy: entry.loggedBy || body.user, Remarks: entry.remarks, Images: entry.images || [], GroupID: body.groupId, CreatedAt: new Date().toISOString() };
       db.records.push(rec);
-      if (entry.muRemark) db.muFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.muRemark, LoggedBy: entry.loggedBy || body.user });
-      if (entry.tuRemark) db.tuFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.tuRemark, LoggedBy: entry.loggedBy || body.user });
+      if (entry.muRemark) db.muFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.muRemark, Selected: "FALSE", LoggedBy: entry.loggedBy || body.user });
+      if (entry.tuRemark) db.tuFeed.unshift({ ID: uid(), BayID: body.bayId, Category: cat, Date: entry.date, PermitNo: entry.permitNo || "", Remark: entry.tuRemark, Selected: "FALSE", LoggedBy: entry.loggedBy || body.user });
     });
   } else if (action === "addEquipmentRemark") {
     const store = body.kind === "TU" ? db.equipTu : db.equipMu;
@@ -991,6 +1116,29 @@ function demoPost(action, body) {
     db.customEquip[body.bayId] = (db.customEquip[body.bayId] || []).filter((c) => c.code !== body.equipCode);
   } else if (action === "setRolePermissions") {
     db.rolePerms = body.perms;
+  } else if (action === "setConfig") {
+    db.config = { ...(db.config || {}), ...(body.config || {}) };
+  } else if (action === "toggleRemarkSelected") {
+    const feed = body.kind === "TU" ? db.tuFeed : db.muFeed;
+    const rec = feed.find((r) => r.ID === body.id);
+    if (rec) rec.Selected = body.selected ? "TRUE" : "FALSE";
+  } else if (action === "editGlobalRemark") {
+    const feed = body.kind === "TU" ? db.tuFeed : db.muFeed;
+    const rec = feed.find((r) => r.ID === body.id);
+    if (rec) rec.Remark = body.remark;
+  } else if (action === "deleteGlobalRemark") {
+    if (body.kind === "TU") db.tuFeed = db.tuFeed.filter((r) => r.ID !== body.id);
+    else db.muFeed = db.muFeed.filter((r) => r.ID !== body.id);
+  } else if (action === "editEquipmentRemark") {
+    const store = body.kind === "TU" ? db.equipTu : db.equipMu;
+    Object.values(store).forEach((list) => { const rec = list.find((r) => r.ID === body.id); if (rec) rec.Remark = body.remark; });
+  } else if (action === "deleteEquipmentRemark") {
+    const store = body.kind === "TU" ? db.equipTu : db.equipMu;
+    Object.keys(store).forEach((k) => { store[k] = store[k].filter((r) => r.ID !== body.id); });
+  } else if (action === "editCustomEquipment") {
+    (db.customEquip[body.bayId] || []).forEach((c) => { if (c.code === body.equipCode) c.label = body.label; });
+  } else if (action === "deleteLogEntry") {
+    db.records = db.records.filter((r) => r.ID !== body.id);
   } else if (action === "uploadImage") {
     // demo mode: keep the data URL itself as the "uploaded" image
     return { ok: true, imageUrl: `data:${body.mimeType};base64,${body.base64}` };
@@ -1040,20 +1188,23 @@ const State = {
   _catTab: {},     // equipCode -> selected category
 };
 function normalizeBayRow(r) {
+  const s = (v) => (v === undefined || v === null ? "" : String(v).trim());
   return {
-    id: r.id || r.BayID,
-    name: r.name || r.Name,
-    voltage: r.voltage || r.VoltageLevel,
-    type: r.type || r.Type,
-    ictGroup: r.ictGroup || r.ICTGroup || "",
-    status: r.status || r.Status,
+    id: s(r.id || r.BayID),
+    name: s(r.name || r.Name),
+    voltage: s(r.voltage || r.VoltageLevel),
+    type: s(r.type || r.Type),
+    ictGroup: s(r.ictGroup || r.ICTGroup),
+    status: s(r.status || r.Status),
   };
 }
 async function loadAll() {
-  const { bays } = await apiGet("getBays");
-  State.bays = (bays || []).map(normalizeBayRow);
-  const { users } = await apiGet("getPrefillUsers");
-  State.prefillUsers = users || [];
+  State.bootError = null;
+  const baysRes = await apiGet("getBays");
+  if (baysRes.__error) { State.bootError = baysRes.__error; State.bays = []; return; }
+  State.bays = (baysRes.bays || []).map(normalizeBayRow);
+  const usersRes = await apiGet("getPrefillUsers");
+  State.prefillUsers = usersRes.__error ? [] : (usersRes.users || []);
 }
 function findBay(id) { return State.bays.find((b) => b.id === id); }
 function isAdmin() { return State.currentRole === "Admin"; }
@@ -1159,14 +1310,12 @@ async function updateType(bayId, type) {
 // ---------------------------------------------------------------------------
 // HOME
 // ---------------------------------------------------------------------------
-function renderHome() {
+async function renderHome() {
   const cats = [
     { k: "400", title: "400 kV Lines & Bays", sub: "1½ CB scheme", count: State.bays.filter(b=>b.voltage==="400").length },
     { k: "220", title: "220 kV Lines & Bays", sub: "Double Main + Transfer", count: State.bays.filter(b=>b.voltage==="220").length },
     { k: "ict", title: "ICTs", sub: "501/167 MVA, phase-wise", count: ICT_GROUPS.length },
     { k: "33", title: "33 kV Yard", sub: "Line, BS, Stn. Transformers", count: State.bays.filter(b=>b.voltage==="33").length },
-    { k: "mu", title: "Maintenance Unit Remarks", sub: "Station-wide MU feed", count: "—" },
-    { k: "tu", title: "Testing Unit Remarks", sub: "Station-wide TU feed", count: "—" },
     { k: "battery", title: "Battery Set", sub: "Charger & bank", count: 1 },
     { k: "dg", title: "DG Set", sub: "Proforma pending", count: 1 },
     { k: "other", title: "Other Maintenance", sub: "Civil / misc.", count: "—" },
@@ -1191,7 +1340,39 @@ function renderHome() {
         </div>
       `).join("")}
     </div>
+
+    <div class="section-block" style="margin-top:28px">
+      <div class="type-label">MU / TU — featured recent remarks (not bays; separate feeds)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px" id="muTuHomeGrid"></div>
+    </div>
   `;
+  renderMuTuHomeWidget();
+}
+
+async function renderMuTuHomeWidget() {
+  const [muRes, tuRes] = await Promise.all([apiGet("getGlobalRemarks", { kind: "MU" }), apiGet("getGlobalRemarks", { kind: "TU" })]);
+  const topN = (records) => (records || [])
+    .filter((r) => r.Selected === true || r.Selected === "TRUE")
+    .sort((a, b) => new Date(b.Date) - new Date(a.Date))
+    .slice(0, 10);
+  const muTop = topN(muRes.records);
+  const tuTop = topN(tuRes.records);
+  const col = (title, kind, list) => `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-family:var(--display);font-weight:700;font-size:14.5px">${title}</div>
+        <button class="btn ghost sm" onclick="setView({k:'${kind.toLowerCase()}'})">Open feed</button>
+      </div>
+      ${list.length === 0
+        ? `<div class="empty-note">No entries featured yet — star entries on the ${title} page to show them here.</div>`
+        : list.map((r) => `
+          <div class="hist-row">
+            <div class="hist-top"><span class="hist-date">${r.Date} · Bay ${r.BayID} · ${r.Category}</span><span style="color:var(--dim)">${r.LoggedBy || "—"}</span></div>
+            <div style="font-size:12px;margin-top:6px">${r.Remark}</div>
+          </div>`).join("")}
+    </div>`;
+  document.getElementById("muTuHomeGrid").innerHTML =
+    col("Maintenance Unit Remarks", "MU", muTop) + col("Testing Unit Remarks", "TU", tuTop);
 }
 
 // ---------------------------------------------------------------------------
@@ -1213,6 +1394,14 @@ function renderBayGrid(voltage, title) {
       ${canManageStructure() ? `<button class="btn" onclick="openAddBayModal('${voltage}')">+ Add Bay</button>` : ""}
     </div>
     ${busbarSVG()}
+    ${State.bays.length === 0 ? `
+      <div class="card" style="border-color:var(--red)">
+        <div style="font-weight:700;color:var(--red);margin-bottom:6px">No bays loaded at all (across every voltage)</div>
+        <div style="font-size:12px;color:var(--dim)">The API call succeeded but returned zero bays. Check that <code>initialize()</code> was run in Apps Script and the Bays tab in your Sheet actually has rows — Extensions → Apps Script → run <code>initialize</code> again if unsure (it's safe to re-run; it only seeds if the tab is empty).</div>
+      </div>
+    ` : bays.length === 0 ? `
+      <div class="empty-note">No ${voltage} kV bays found. If you expect some here, check the VoltageLevel column for these rows in the Sheet matches "${voltage}" exactly.</div>
+    ` : ""}
     ${Object.entries(groups).map(([type, list]) => `
       <div class="section-block">
         <div class="type-label">${type} · ${list.length}</div>
@@ -1300,7 +1489,7 @@ function renderICTDetail(groupId) {
     <h1 class="page-title" style="margin-top:10px">${g.label}</h1>
     <div class="page-sub">HV Bay ${g.hv} ${g.iv ? `· IV Bay ${g.iv}` : "· No IV pairing (spare)"} — "RRS Region" label kept exactly as specified; flag if it should read differently. ICT phase / tertiary / RRS checklists are placeholders pending your real proforma.</div>
     ${busbarSVG()}
-    <div class="tabs">${tabs.map(t => `<button class="tab ${activeCode===t.code?"active":""}" onclick="selectEquip('${g.id}','${t.code}')">${t.label}</button>`).join("")}</div>
+    <div class="tabs" id="equipTabs">${tabs.map(t => `<button class="tab ${activeCode===t.code?"active":""}" data-code="${t.code}" onclick="selectEquip('${g.id}','${t.code}')">${t.label}</button>`).join("")}</div>
     <div id="equipPanel"></div>
   `;
   const activeItem = tabs.find(t => t.code === activeCode);
@@ -1353,12 +1542,31 @@ async function renderBayDetail(bayId) {
       ${canManageStructure() ? `<button class="btn ghost sm" onclick="openAddEquipmentModal('${bay.id}')">+ Add Equipment</button>` : ""}
     </div>
     <div class="tabs" id="equipTabs">
-      ${equipment.map(e => `<button class="tab ${activeEquip===e.code?"active":""}" onclick="selectEquip('${bay.id}','${e.code}')">${e.code}${e.custom?" ✦":""}</button>`).join("")}
+      ${equipment.map(e => `<button class="tab ${activeEquip===e.code?"active":""}" data-code="${e.code}" onclick="selectEquip('${bay.id}','${e.code}')">${e.code}${e.custom?" ✦":""}</button>`).join("")}
     </div>
 
     <div id="equipPanel"></div>
   `;
   if (activeEquip) await renderEquipPanel(bay, equipment.find(e => e.code === activeEquip));
+}
+
+function editCustomEquipmentPrompt(bayId, equipCode, currentLabel) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit Equipment Label — ${equipCode}</div>
+    <label class="fld"><span>Label</span><input class="in" id="ece_label" value="${currentLabel.replace(/"/g,'&quot;')}"/></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveCustomEquipmentLabel('${bayId}','${equipCode}')">Save</button>
+    </div>
+  `);
+}
+async function saveCustomEquipmentLabel(bayId, equipCode) {
+  const label = document.getElementById("ece_label").value.trim();
+  if (!label) return;
+  await apiPost("editCustomEquipment", { bayId, equipCode, label });
+  closeModal();
+  renderBayDetail(bayId);
 }
 
 function confirmDeleteEquipment(bayId, equipCode, isCustom) {
@@ -1403,6 +1611,12 @@ async function doDeleteBay(bayId) {
 
 function selectEquip(bayId, code) {
   State._equipTab[bayId] = code;
+  const tabsEl = document.getElementById("equipTabs");
+  if (tabsEl) {
+    tabsEl.querySelectorAll("button.tab").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.code === code);
+    });
+  }
   renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === code));
 }
 
@@ -1488,6 +1702,7 @@ async function renderEquipPanel(bay, equipItem) {
         <div style="font-family:var(--display);font-weight:700;font-size:15px">${code} — ${equipItem.label}</div>
         <div style="display:flex;gap:6px">
           <button class="btn ghost sm" onclick="editEquipInfo('${bay.id}','${code}', ${equipItem.perPhase})">edit info</button>
+          ${canManageStructure() && !bay.isICT && equipItem.custom ? `<button class="btn ghost sm" onclick="editCustomEquipmentPrompt('${bay.id}','${code}','${(equipItem.label||"").replace(/'/g,"\\'")}')">edit label</button>` : ""}
           ${canManageStructure() && !bay.isICT ? `<button class="btn danger sm" onclick="confirmDeleteEquipment('${bay.id}','${code}', ${!!equipItem.custom})">delete</button>` : ""}
         </div>
       </div>
@@ -1504,13 +1719,13 @@ async function renderEquipPanel(bay, equipItem) {
 
     <div class="type-label" style="display:flex;justify-content:space-between;align-items:center">
       <span>${cat} Checklist</span>
-      ${canFullLog() ? `<button class="btn ghost sm" onclick="addSection()">+ Add Section</button>` : ""}
+      ${isAdmin() ? `<button class="btn ghost sm" onclick="openChecklistManager()">⚙ Add / Edit Checkpoints</button>` : ""}
     </div>
-    <div id="sectionsRoot">${renderSections(sections)}</div>
+    <div id="sectionsRoot">${renderSectionsReadOnly(sections)}</div>
 
     <div class="section-block" style="margin-top:26px">
       <div class="type-label">Recent ${cat} entries</div>
-      <div id="equipHistory">${renderEquipHistory(equipRecords, cat)}</div>
+      <div id="equipHistory">${renderEquipHistory(equipRecords, cat, bay.id, code)}</div>
     </div>
 
     <div class="section-block" style="margin-top:26px;display:grid;grid-template-columns:1fr 1fr;gap:20px">
@@ -1519,14 +1734,14 @@ async function renderEquipPanel(bay, equipItem) {
           <div class="type-label" style="margin:0">Maintenance Unit Remarks</div>
           ${canEnterMU() ? `<button class="btn ghost sm" onclick="addEquipRemarkPrompt('MU','${bay.id}','${code}')">+ Add</button>` : ""}
         </div>
-        <div id="muList">${renderRemarkList(muRes.records || [])}</div>
+        <div id="muList">${renderRemarkList(muRes.records || [], "MU", bay.id, code)}</div>
       </div>
       <div>
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
           <div class="type-label" style="margin:0">Testing Unit Remarks</div>
           ${canEnterTU() ? `<button class="btn ghost sm" onclick="addEquipRemarkPrompt('TU','${bay.id}','${code}')">+ Add</button>` : ""}
         </div>
-        <div id="tuList">${renderRemarkList(tuRes.records || [])}</div>
+        <div id="tuList">${renderRemarkList(tuRes.records || [], "TU", bay.id, code)}</div>
       </div>
     </div>
   `;
@@ -1632,109 +1847,109 @@ function switchCategory(cat) {
 // ---------------------------------------------------------------------------
 let dragCtx = null;
 
-function renderSections(sections) {
-  return sections.map((s, si) => `
+// Read-only preview shown on the equipment panel — just informs what the
+// checklist covers. All structural editing lives in openChecklistManager().
+function renderSectionsReadOnly(sections) {
+  if (!sections.length) return `<div class="empty-note">No checklist sections yet.</div>`;
+  return sections.map((s) => `
+    <div class="card" style="margin-bottom:10px">
+      <div style="font-family:var(--display);font-weight:700;font-size:13.5px">${s.title}</div>
+      ${s.description ? `<div style="font-size:11.5px;color:var(--dim);margin-top:3px">${s.description}</div>` : ""}
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:8px">
+        ${s.items.map((it) => `<span class="badge dim">${it.text}</span>`).join("")}
+      </div>
+    </div>
+  `).join("");
+}
+
+// ---------------------------------------------------------------------------
+// CHECKLIST MANAGER — single consolidated Add/Edit/Delete/Reorder editor for
+// sections & checkpoints. Admin-only. Opens as a big modal, edits happen on
+// a working copy, and nothing is persisted until "Save" — which then runs
+// the scope popup (this bay / selected bays / all bays of this type).
+// ---------------------------------------------------------------------------
+let ChecklistManagerDraft = null;
+
+function openChecklistManager() {
+  ChecklistManagerDraft = JSON.parse(JSON.stringify(State._currentSections));
+  renderChecklistManager();
+}
+function renderChecklistManager() {
+  const { equipItem, cat } = State._currentEquip;
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = `
+    <div class="modal-backdrop">
+      <div class="modal" style="max-width:760px">
+        <div style="font-family:var(--display);font-weight:700;font-size:17px;margin-bottom:4px">Add / Edit Checkpoints — ${equipItem.code} (${cat})</div>
+        <div style="color:var(--dim);font-size:12px;margin-bottom:14px">Admin only. Edit section titles, descriptions, and checkpoint text directly below; drag ⠿ handles to reorder. Nothing saves until you click Save.</div>
+        <div id="cmSectionsRoot">${renderManagerSections()}</div>
+        <button class="btn ghost sm" style="margin-top:6px" onclick="managerAddSection()">+ Add Section</button>
+        <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:18px;border-top:1px solid var(--border);padding-top:14px">
+          <button class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button class="btn" onclick="managerSave()">Save…</button>
+        </div>
+      </div>
+    </div>
+  `;
+}
+function renderManagerSections() {
+  return ChecklistManagerDraft.map((s, si) => `
     <div class="card" style="margin-bottom:12px" draggable="true"
          ondragstart="dragCtx={type:'section',index:${si}}"
          ondragover="event.preventDefault()"
-         ondrop="onDropSection(${si})">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px;cursor:grab">
-        <div>
-          <div style="font-family:var(--display);font-weight:700;font-size:13.5px">⠿ ${s.title}</div>
-          ${s.description ? `<div style="font-size:11.5px;color:var(--dim);margin-top:3px">${s.description}</div>` : ""}
+         ondrop="managerDropSection(${si})">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:8px">
+        <div style="flex:1">
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;cursor:grab">
+            <span style="color:var(--dim)">⠿</span>
+            <input class="in" value="${(s.title||"").replace(/"/g,'&quot;')}" oninput="managerUpdateSectionTitle(${si}, this.value)" placeholder="Section title"/>
+          </div>
+          <textarea class="in" rows="1" placeholder="Description (optional)" oninput="managerUpdateSectionDesc(${si}, this.value)">${s.description||""}</textarea>
         </div>
-        <div style="display:flex;gap:6px">
-          <button class="btn ghost sm" onclick="addCheckpoint(${si})">+ Add checkpoint</button>
-          ${canManageStructure() ? `<button class="btn danger sm" onclick="deleteSection(${si})">delete section</button>` : ""}
-        </div>
+        <button class="btn danger sm" onclick="managerDeleteSection(${si})">delete section</button>
       </div>
       <div>
         ${s.items.map((it, ii) => `
           <div class="checklist-item" draggable="true"
                ondragstart="event.stopPropagation();dragCtx={type:'item',sectionIndex:${si},index:${ii}}"
                ondragover="event.preventDefault()"
-               ondrop="event.stopPropagation();onDropItem(${si},${ii})">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px;margin-bottom:6px;cursor:grab">
-              <div style="font-size:12.5px">⠿ ${it.text}</div>
-              ${canManageStructure() ? `<button class="btn danger sm" onclick="deleteCheckpoint(${si},${ii})" style="flex-shrink:0">✕</button>` : ""}
-            </div>
+               ondrop="event.stopPropagation();managerDropItem(${si},${ii})">
             <div class="row">
-              <textarea class="in" rows="1" data-checkpoint="${it.id}" placeholder="Remark…" style="resize:vertical"></textarea>
-              ${canPrefill() ? `<button class="btn ghost sm" onclick="prefillCheckpoint('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
+              <span style="color:var(--dim);cursor:grab;padding-top:8px">⠿</span>
+              <input class="in" value="${(it.text||"").replace(/"/g,'&quot;')}" oninput="managerUpdateItemText(${si},${ii}, this.value)" placeholder="Checkpoint text"/>
+              <button class="btn danger sm" onclick="managerDeleteItem(${si},${ii})">✕</button>
             </div>
           </div>
         `).join("")}
       </div>
+      <button class="btn ghost sm" style="margin-top:8px" onclick="managerAddItem(${si})">+ Add checkpoint</button>
     </div>
   `).join("");
 }
-function deleteSection(si) {
-  State._currentSections.splice(si, 1);
-  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
-}
-function deleteCheckpoint(si, ii) {
-  State._currentSections[si].items.splice(ii, 1);
-  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
-}
-
-function onDropSection(targetIndex) {
+function refreshManager() { document.getElementById("cmSectionsRoot").innerHTML = renderManagerSections(); }
+function managerUpdateSectionTitle(si, v) { ChecklistManagerDraft[si].title = v; }
+function managerUpdateSectionDesc(si, v) { ChecklistManagerDraft[si].description = v; }
+function managerUpdateItemText(si, ii, v) { ChecklistManagerDraft[si].items[ii].text = v; }
+function managerAddSection() { ChecklistManagerDraft.push({ id: uid(), title: "New section", description: "", items: [] }); refreshManager(); }
+function managerDeleteSection(si) { ChecklistManagerDraft.splice(si, 1); refreshManager(); }
+function managerAddItem(si) { ChecklistManagerDraft[si].items.push({ id: uid(), text: "New checkpoint" }); refreshManager(); }
+function managerDeleteItem(si, ii) { ChecklistManagerDraft[si].items.splice(ii, 1); refreshManager(); }
+function managerDropSection(targetIndex) {
   if (!dragCtx || dragCtx.type !== "section") return;
-  const sections = State._currentSections;
-  const [moved] = sections.splice(dragCtx.index, 1);
-  sections.splice(targetIndex, 0, moved);
-  dragCtx = null;
-  document.getElementById("sectionsRoot").innerHTML = renderSections(sections);
+  const [moved] = ChecklistManagerDraft.splice(dragCtx.index, 1);
+  ChecklistManagerDraft.splice(targetIndex, 0, moved);
+  dragCtx = null; refreshManager();
 }
-function onDropItem(sectionIndex, targetIndex) {
+function managerDropItem(sectionIndex, targetIndex) {
   if (!dragCtx || dragCtx.type !== "item") return;
-  const sections = State._currentSections;
-  const items = sections[dragCtx.sectionIndex].items;
+  const items = ChecklistManagerDraft[dragCtx.sectionIndex].items;
   const [moved] = items.splice(dragCtx.index, 1);
-  sections[sectionIndex].items.splice(targetIndex, 0, moved);
-  dragCtx = null;
-  document.getElementById("sectionsRoot").innerHTML = renderSections(sections);
+  ChecklistManagerDraft[sectionIndex].items.splice(targetIndex, 0, moved);
+  dragCtx = null; refreshManager();
 }
-
-function prefillCheckpoint(checkpointId, text) {
-  const el = document.querySelector(`textarea[data-checkpoint="${CSS.escape(checkpointId)}"]`);
-  if (el) el.value = pickRemark(text);
-}
-
-function addSection() {
-  const root = document.getElementById("modalRoot");
-  root.innerHTML = modalWrap(`
-    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Add Section</div>
-    <label class="fld"><span>Section title</span><input class="in" id="as_title" placeholder="e.g. MARSHALLING BOX"/></label>
-    <label class="fld"><span>Description (optional — what this section covers)</span><textarea class="in" id="as_desc" rows="2" placeholder="Brief description of this section's scope…"></textarea></label>
-    <div style="display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" onclick="submitAddSection()">Add & choose scope</button>
-    </div>
-  `);
-}
-function submitAddSection() {
-  const title = document.getElementById("as_title").value.trim();
-  const description = document.getElementById("as_desc").value.trim();
-  if (!title) return;
-  State._currentSections.push({ id: uid(), title, description, items: [] });
-  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
-}
-function addCheckpoint(sectionIndex) {
-  const root = document.getElementById("modalRoot");
-  root.innerHTML = modalWrap(`
-    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Add Checkpoint</div>
-    <label class="fld"><span>Checkpoint text</span><textarea class="in" id="ac_text" rows="2" placeholder="e.g. Check earthing continuity"></textarea></label>
-    <div style="display:flex;justify-content:flex-end;gap:8px">
-      <button class="btn ghost" onclick="closeModal()">Cancel</button>
-      <button class="btn" onclick="submitAddCheckpoint(${sectionIndex})">Add & choose scope</button>
-    </div>
-  `);
-}
-function submitAddCheckpoint(sectionIndex) {
-  const text = document.getElementById("ac_text").value.trim();
-  if (!text) return;
-  State._currentSections[sectionIndex].items.push({ id: uid(), text });
-  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSections(State._currentSections));
+function managerSave() {
+  State._currentSections = ChecklistManagerDraft;
+  promptScopeAndSave(() => document.getElementById("sectionsRoot").innerHTML = renderSectionsReadOnly(State._currentSections));
 }
 
 // Finds every {bayId, equipCode} across BOTH real bays and ICT pseudo-bays
@@ -1808,7 +2023,7 @@ function applyScope(mode) {
   });
 }
 
-function renderEquipHistory(records, category) {
+function renderEquipHistory(records, category, bayId, equipCode) {
   const list = records.filter((r) => r.Category === category).sort((a,b) => new Date(b.Date) - new Date(a.Date));
   if (!list.length) return `<div class="empty-note">No entries yet.</div>`;
   return list.map((r) => {
@@ -1817,21 +2032,86 @@ function renderEquipHistory(records, category) {
     return `<div class="hist-row">
       <div class="hist-top">
         <span class="hist-date">${r.Date}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
-        <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
+          ${isAdmin() ? `<button class="btn danger sm" onclick="confirmDeleteLogEntry('${r.ID}','${bayId}','${equipCode}')">delete</button>` : ""}
+        </div>
       </div>
       <div class="hist-remarks">${Object.entries(remarks).filter(([,v])=>v).map(([k,v]) => `<div class="hist-remark"><b>${k}:</b> ${v}</div>`).join("")}</div>
       ${renderSavedPhotoGrid(images)}
     </div>`;
   }).join("");
 }
-function renderRemarkList(records) {
+function confirmDeleteLogEntry(id, bayId, equipCode) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Delete this log entry?</div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:16px">This permanently removes it from the maintenance history — there's no undo.</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn danger" onclick="doDeleteLogEntry('${id}','${bayId}','${equipCode}')">Delete permanently</button>
+    </div>
+  `);
+}
+async function doDeleteLogEntry(id, bayId, equipCode) {
+  await apiPost("deleteLogEntry", { id });
+  closeModal();
+  renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === equipCode));
+}
+function renderRemarkList(records, kind, bayId, equipCode) {
   const list = [...records].sort((a,b) => new Date(b.Date) - new Date(a.Date));
   if (!list.length) return `<div class="empty-note">No remarks yet.</div>`;
   return list.map((r) => `<div class="hist-row">
-    <div class="hist-top"><span class="hist-date">${r.Date}</span><span style="color:var(--dim)">${r.LoggedBy||"—"}</span></div>
+    <div class="hist-top">
+      <span class="hist-date">${r.Date}</span>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="color:var(--dim)">${r.LoggedBy||"—"}</span>
+        ${isAdmin() ? `
+          <button class="btn ghost sm" onclick="editEquipRemarkPrompt('${kind}','${r.ID}','${bayId}','${equipCode}')">edit</button>
+          <button class="btn danger sm" onclick="confirmDeleteEquipRemark('${kind}','${r.ID}','${bayId}','${equipCode}')">delete</button>
+        ` : ""}
+      </div>
+    </div>
     <div style="font-size:12.5px;margin-top:6px">${r.Remark}</div>
     ${renderSavedPhotoGrid(r.Images || [])}
   </div>`).join("");
+}
+function editEquipRemarkPrompt(kind, id, bayId, equipCode) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit ${kind} Remark</div>
+    <label class="fld"><span>Remark</span><textarea class="in" id="eer_text" rows="3"></textarea></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveEquipRemarkEdit('${kind}','${id}','${bayId}','${equipCode}')">Save</button>
+    </div>
+  `);
+  apiGet("getEquipmentRemarks", { kind, bayId, equipCode }).then(({ records }) => {
+    const rec = (records || []).find((r) => r.ID === id);
+    if (rec) document.getElementById("eer_text").value = rec.Remark;
+  });
+}
+async function saveEquipRemarkEdit(kind, id, bayId, equipCode) {
+  const remark = document.getElementById("eer_text").value.trim();
+  if (!remark) return;
+  await apiPost("editEquipmentRemark", { kind, id, remark });
+  closeModal();
+  renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === equipCode));
+}
+function confirmDeleteEquipRemark(kind, id, bayId, equipCode) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Delete this remark?</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn danger" onclick="doDeleteEquipRemark('${kind}','${id}','${bayId}','${equipCode}')">Delete</button>
+    </div>
+  `);
+}
+async function doDeleteEquipRemark(kind, id, bayId, equipCode) {
+  await apiPost("deleteEquipmentRemark", { kind, id });
+  closeModal();
+  renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === equipCode));
 }
 function addEquipRemarkPrompt(kind, bayId, equipCode) {
   resetPhotoStage();
@@ -1983,18 +2263,69 @@ async function renderGlobalRemarks(kind) {
   const list = (records || []).slice().sort((a,b) => new Date(b.Date) - new Date(a.Date));
   app.innerHTML = `
     <h1 class="page-title">${kind === "MU" ? "Maintenance Unit Remarks" : "Testing Unit Remarks"}</h1>
-    <div class="page-sub">Station-wide feed — auto-punched from bay-level Monthly/Quarterly/Annual logging when a ${kind} remark is entered. Equipment-level ad hoc ${kind} notes live on each equipment's own tab and aren't duplicated here.</div>
+    <div class="page-sub">Station-wide feed — auto-punched from bay-level Monthly/Quarterly/Annual logging when a ${kind} remark is entered. Equipment-level ad hoc ${kind} notes live on each equipment's own tab and aren't duplicated here. Star an entry to feature it in the Home page ${kind} widget (top 10 most recent starred entries).</div>
     ${busbarSVG()}
-    ${list.length === 0 ? `<div class="empty-note">No ${kind} remarks logged yet.</div>` : list.map((r) => `
+    ${list.length === 0 ? `<div class="empty-note">No ${kind} remarks logged yet.</div>` : list.map((r) => {
+      const selected = r.Selected === true || r.Selected === "TRUE";
+      return `
       <div class="hist-row">
         <div class="hist-top">
           <span class="hist-date">${r.Date} · Bay ${r.BayID} · ${r.Category}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
-          <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
+            <button class="btn ${selected ? "" : "ghost"} sm" onclick="toggleRemarkStar('${kind}','${r.ID}', ${!selected})">${selected ? "★ Featured" : "☆ Feature on Home"}</button>
+            ${isAdmin() ? `
+              <button class="btn ghost sm" onclick="editGlobalRemarkPrompt('${kind}','${r.ID}')">edit</button>
+              <button class="btn danger sm" onclick="confirmDeleteGlobalRemark('${kind}','${r.ID}')">delete</button>
+            ` : ""}
+          </div>
         </div>
         <div style="font-size:12.5px;margin-top:6px">${r.Remark}</div>
       </div>
-    `).join("")}
+    `;
+    }).join("")}
   `;
+}
+function editGlobalRemarkPrompt(kind, id) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit Remark</div>
+    <label class="fld"><span>Remark</span><textarea class="in" id="egr_text" rows="3"></textarea></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveGlobalRemarkEdit('${kind}','${id}')">Save</button>
+    </div>
+  `);
+  apiGet("getGlobalRemarks", { kind }).then(({ records }) => {
+    const rec = (records || []).find((r) => r.ID === id);
+    if (rec) document.getElementById("egr_text").value = rec.Remark;
+  });
+}
+async function saveGlobalRemarkEdit(kind, id) {
+  const remark = document.getElementById("egr_text").value.trim();
+  if (!remark) return;
+  await apiPost("editGlobalRemark", { kind, id, remark });
+  closeModal();
+  renderGlobalRemarks(kind);
+}
+function confirmDeleteGlobalRemark(kind, id) {
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Delete this remark?</div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn danger" onclick="doDeleteGlobalRemark('${kind}','${id}')">Delete</button>
+    </div>
+  `);
+}
+async function doDeleteGlobalRemark(kind, id) {
+  await apiPost("deleteGlobalRemark", { kind, id });
+  closeModal();
+  renderGlobalRemarks(kind);
+}
+async function toggleRemarkStar(kind, id, selected) {
+  await apiPost("toggleRemarkSelected", { kind, id, selected });
+  renderGlobalRemarks(kind);
 }
 
 // ---------------------------------------------------------------------------
@@ -2101,6 +2432,13 @@ function renderAdmin() {
     <div class="page-sub">Role-based access control. The topbar ROLE selector simulates login for now — real per-user auth needs backend deployment.</div>
     ${busbarSVG()}
     <div class="card" style="max-width:520px;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600;margin-bottom:6px">Weather &amp; theme</div>
+      <div style="font-size:11.5px;color:var(--dim);margin-bottom:10px">Site theme follows live weather at Siddhatek by default. Individual users can override it for their own browser from the weather badge (bottom-right). This switch controls the effect site-wide.</div>
+      <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer">
+        <input type="checkbox" id="weatherEffectsToggle" ${WeatherState.effectsEnabled ? "checked" : ""} onchange="setWeatherEffectsEnabled(this.checked)"/> Enable weather effects site-wide (off = sunny, very light cloud, no rain)
+      </label>
+    </div>
+    <div class="card" style="max-width:520px;margin-bottom:16px">
       <div style="font-size:13px;font-weight:600;margin-bottom:6px">Role permissions</div>
       <div style="font-size:11.5px;color:var(--dim);margin-bottom:12px">Admin and Editor always have full logging access. MU/TU roles are normally limited to their own remarks — grant "full data" to let them use the complete M/Q/A checklist logger too (i.e. enter each other's data).</div>
       <label style="display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:8px;cursor:pointer">
@@ -2150,13 +2488,34 @@ function renderStub(k) {
 document.getElementById("roleSelect").addEventListener("change", (e) => { State.currentRole = e.target.value; render(); });
 document.getElementById("userNameInput").addEventListener("change", (e) => { State.currentUser = e.target.value.trim() || "Guest User"; });
 (async function boot() {
-  await loadAll();
-  const { perms } = await apiGet("getRolePermissions");
-  State.muFullAccess = (perms && perms.MU_FULL_ACCESS) === "true";
-  State.tuFullAccess = (perms && perms.TU_FULL_ACCESS) === "true";
-  render();
-  initWeather();
+  try {
+    await loadAll();
+    if (State.bootError) { renderBootError(State.bootError); return; }
+    const permsRes = await apiGet("getRolePermissions");
+    const perms = permsRes.__error ? {} : (permsRes.perms || {});
+    State.muFullAccess = perms.MU_FULL_ACCESS === "true";
+    State.tuFullAccess = perms.TU_FULL_ACCESS === "true";
+    render();
+    initWeather();
+  } catch (e) {
+    renderBootError(`Unexpected error during startup: ${e.message || e}`);
+  }
 })();
+
+function renderBootError(message) {
+  document.getElementById("mainnav").innerHTML = "";
+  app.innerHTML = `
+    <div class="card" style="max-width:640px;margin:40px auto;border-color:var(--red)">
+      <div style="font-family:var(--display);font-weight:700;font-size:16px;color:var(--red);margin-bottom:8px">Couldn't load data from the Sheet</div>
+      <div style="font-size:12.5px;color:var(--dim);margin-bottom:14px">This shows exactly what failed, so it can actually be fixed instead of just guessing:</div>
+      <div style="font-family:var(--mono);font-size:11.5px;background:var(--panel2);border:1px solid var(--border);border-radius:8px;padding:10px;word-break:break-word;margin-bottom:14px">${message}</div>
+      <div style="font-size:12px;color:var(--dim);margin-bottom:14px">
+        Common causes: the Apps Script deployment wasn't redeployed as a "New version" after the last code.gs update · the deployment's access isn't set to "Anyone" · CONFIG.API_URL in this file doesn't match the current /exec URL.
+      </div>
+      <button class="btn" onclick="location.reload()">Retry</button>
+    </div>
+  `;
+}
 
   </script>
 </body>
