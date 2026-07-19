@@ -609,7 +609,7 @@ function updateWeatherBadge(mode, cloudPct) {
   if (!el) return;
   const labels = { sunny: "Sunny", cloudy: "Cloudy", rainy: "Rain" };
   const src = WeatherState.manualMode !== "auto" ? " (manual)" : "";
-  el.textContent = `Siddhatek · ${labels[mode] || "—"}${WeatherState.liveTemp != null && WeatherState.manualMode === "auto" ? ` · ${Math.round(WeatherState.liveTemp)}°C` : ""}${src}`;
+  el.textContent = `Siddhatek · ${labels[mode] || "—"}${WeatherState.liveTemp != null && WeatherState.manualMode === "auto" ? ` · ${Math.round(WeatherState.liveTemp)}°C` : ""}${src} ▾`;
 }
 
 function resizeWeatherCanvas() {
@@ -619,13 +619,18 @@ function resizeWeatherCanvas() {
 }
 
 function seedRainParticles(mode) {
-  const count = mode === "rainy" ? 160 : 0;
+  const count = mode === "rainy" ? 130 : 0;
+  const w = WeatherFX.w;
+  const contentWidth = Math.min(1220, w - 40);
+  const contentLeft = (w - contentWidth) / 2;
+  const contentRight = contentLeft + contentWidth;
   WeatherFX.drops = Array.from({ length: count }, () => ({
-    x: Math.random() * WeatherFX.w,
+    x: Math.random() < 0.75 ? (Math.random() < 0.5 ? Math.random() * contentLeft : contentRight + Math.random() * (w - contentRight)) : Math.random() * w,
     y: Math.random() * WeatherFX.h,
     len: 10 + Math.random() * 18,
     speed: 8 + Math.random() * 5,
     drift: 1.6,
+    slideDir: 0,
   }));
 }
 
@@ -633,15 +638,33 @@ function loopWeather() {
   const { ctx, w, h, mode } = WeatherFX;
   ctx.clearRect(0, 0, w, h);
   if (WeatherFX.drops.length) {
+    const contentWidth = Math.min(1220, w - 40);
+    const contentLeft = (w - contentWidth) / 2;
+    const contentRight = contentLeft + contentWidth;
+    const topbarH = 64;
     ctx.strokeStyle = "rgba(200,225,235,0.5)";
     ctx.lineWidth = 1.3;
     WeatherFX.drops.forEach((d) => {
+      const insideContent = d.y > topbarH && d.x > contentLeft && d.x < contentRight;
+      if (insideContent) {
+        // first moment it enters the working window: commit to a side and slide there
+        if (!d.slideDir) d.slideDir = d.x < (contentLeft + contentRight) / 2 ? -1 : 1;
+        d.x += d.slideDir * (d.speed * 0.6);
+      } else {
+        d.slideDir = 0;
+      }
       ctx.beginPath();
       ctx.moveTo(d.x, d.y);
       ctx.lineTo(d.x - d.drift, d.y + d.len);
       ctx.stroke();
-      d.y += d.speed; d.x -= d.drift * 0.4;
-      if (d.y > h) { d.y = -d.len; d.x = Math.random() * w; }
+      d.y += d.speed;
+      if (!insideContent) d.x -= d.drift * 0.4;
+      if (d.y > h) {
+        d.y = -d.len;
+        // mostly respawn in the margins so drops rarely need to cross the window at all
+        d.x = Math.random() < 0.75 ? (Math.random() < 0.5 ? Math.random() * contentLeft : contentRight + Math.random() * (w - contentRight)) : Math.random() * w;
+        d.slideDir = 0;
+      }
     });
   }
   WeatherFX.raf = requestAnimationFrame(loopWeather);
@@ -682,7 +705,7 @@ function renderWeatherMenu() {
   if (!menu) return;
   const opts = ["auto", "sunny", "cloudy", "rainy"];
   menu.innerHTML = `
-    <div class="menu-label">Weather (this device)</div>
+    <div class="menu-label">Preview any theme (this device only)</div>
     ${opts.map((o) => `<button class="${WeatherState.manualMode === o ? "active" : ""}" onclick="setManualWeather('${o}')">${MODE_LABELS[o]}</button>`).join("")}
     ${!WeatherState.effectsEnabled ? `<div class="menu-label" style="color:var(--red)">Effects disabled site-wide by admin</div>` : ""}
   `;
@@ -1359,17 +1382,60 @@ function busbarSVG() {
     ${[40,120,200,280,360].map(x => `<rect x="${x-3}" y="2" width="6" height="6" fill="var(--bg)" stroke="var(--amber)" stroke-width="1"/>`).join("")}
   </svg>`;
 }
-function statusEditor(bay) {
-  return `<select class="status-select" onclick="event.stopPropagation()" onchange="updateStatus('${bay.id}', this.value)">
-    ${STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === bay.status ? "selected" : ""}>${s}</option>`).join("")}
-  </select>`;
+function statusIndicator(bay) {
+  const isActive = bay.status === "Active";
+  const inner = isActive
+    ? `<span class="status-dot" title="Active"></span>`
+    : `<span class="badge ${statusBadgeClass(bay.status)}">${bay.status}</span>`;
+  if (!isAdmin()) return inner;
+  return `<span style="cursor:pointer" title="Click to edit status" onclick="event.stopPropagation();openStatusEditModal('${bay.id}')">${inner}</span>`;
 }
-function typeEditor(bay) {
+function openStatusEditModal(bayId) {
+  const bay = findBay(bayId);
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit Status — Bay ${bayId}</div>
+    <label class="fld"><span>Status</span>
+      <select class="in" id="sem_status">${STATUS_OPTIONS.map((s) => `<option value="${s}" ${s === bay.status ? "selected" : ""}>${s}</option>`).join("")}</select>
+    </label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveStatusEdit('${bayId}')">Save</button>
+    </div>
+  `);
+}
+async function saveStatusEdit(bayId) {
+  const status = document.getElementById("sem_status").value;
+  await updateStatus(bayId, status);
+  closeModal();
+}
+
+function typeIndicator(bay) {
+  if (!isAdmin()) return bay.type;
+  return `<span style="cursor:pointer;text-decoration:underline dotted;text-underline-offset:3px" title="Click to edit bay type" onclick="openTypeEditModal('${bay.id}')">${bay.type}</span>`;
+}
+function openTypeEditModal(bayId) {
+  const bay = findBay(bayId);
   const types = TYPES_FOR_VOLTAGE[bay.voltage] || [bay.type];
   const opts = types.includes(bay.type) ? types : [bay.type, ...types];
-  return `<select class="status-select" onclick="event.stopPropagation()" onchange="updateType('${bay.id}', this.value)">
-    ${opts.map((t) => `<option value="${t}" ${t === bay.type ? "selected" : ""}>${t}</option>`).join("")}
-  </select>`;
+  const root = document.getElementById("modalRoot");
+  root.innerHTML = modalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Edit Bay Type — Bay ${bayId}</div>
+    <div style="color:var(--dim);font-size:12px;margin-bottom:12px">Changing this regenerates the equipment list from the new type's template.</div>
+    <label class="fld"><span>Type</span>
+      <select class="in" id="tem_type">${opts.map((t) => `<option value="${t}" ${t === bay.type ? "selected" : ""}>${t}</option>`).join("")}</select>
+    </label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="closeModal()">Cancel</button>
+      <button class="btn" onclick="saveTypeEdit('${bayId}')">Save</button>
+    </div>
+  `);
+}
+async function saveTypeEdit(bayId) {
+  const type = document.getElementById("tem_type").value;
+  await updateType(bayId, type);
+  closeModal();
+  render();
 }
 async function updateStatus(bayId, status) {
   const b = findBay(bayId);
@@ -1377,7 +1443,17 @@ async function updateStatus(bayId, status) {
   await apiPost("updateBayStatus", { bayId, status, user: State.currentUser });
   if (b) b.status = status;
   if (wasFuture && (status === "Active" || status === "Commissioning Soon")) {
-    alert("This bay is still typed as 'Future' — use the Type dropdown on the bay page to set its real bay type (Line/Tie/etc.) so the correct equipment list is generated.");
+    setTimeout(() => {
+      const root = document.getElementById("modalRoot");
+      root.innerHTML = modalWrap(`
+        <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Set the real bay type?</div>
+        <div style="color:var(--dim);font-size:12.5px;margin-bottom:16px">This bay is still typed as "Future" — set its real bay type (Line/Tie/etc.) now so the correct equipment list generates.</div>
+        <div style="display:flex;justify-content:flex-end;gap:8px">
+          <button class="btn ghost" onclick="closeModal()">Later</button>
+          <button class="btn" onclick="closeModal();openTypeEditModal('${bayId}')">Set type now</button>
+        </div>
+      `);
+    }, 50);
   }
   render();
 }
@@ -1490,7 +1566,7 @@ function renderBayGrid(voltage, title) {
             <div class="card clickable" onclick="setView({k:'bay',id:'${b.id}'})">
               <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
                 <div style="font-family:var(--mono);font-size:11px;color:var(--copper)">BAY ${b.id}</div>
-                ${statusEditor(b)}
+                ${statusIndicator(b)}
               </div>
               <div style="font-size:13.5px;margin-top:8px;font-weight:600;line-height:1.35">${b.name}</div>
             </div>
@@ -1611,9 +1687,9 @@ async function renderBayDetail(bayId) {
     <!-- BAY INFORMATION PANEL -->
     <div class="card" style="margin-top:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:14px;align-items:center">
       <div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Voltage</div><div style="font-size:13px;margin-top:2px">${bay.voltage} kV</div></div>
-      <div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Type</div><div style="margin-top:4px">${typeEditor(bay)}</div></div>
+      <div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Type</div><div style="margin-top:4px">${typeIndicator(bay)}</div></div>
       <div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">ICT Group</div><div style="font-size:13px;margin-top:2px">${bay.ictGroup || "—"}</div></div>
-      <div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Status</div><div style="margin-top:4px">${statusEditor(bay)}</div></div>
+      <div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Status</div><div style="margin-top:4px">${statusIndicator(bay)}</div></div>
     </div>
 
     ${busbarSVG()}
