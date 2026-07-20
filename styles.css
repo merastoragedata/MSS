@@ -229,13 +229,40 @@ nav.mainnav{display:flex;gap:3px;flex-wrap:wrap}
 nav.mainnav button{
   background:transparent;border:none;border-radius:7px;
   color:var(--dim);font-family:var(--ui);font-weight:600;font-size:12.5px;
-  padding:8px 12px;cursor:pointer;transition:.15s;
+  padding:8px 12px;cursor:pointer;transition:.15s;white-space:nowrap;
 }
 nav.mainnav button:hover{color:var(--text)}
-nav.mainnav button.active{background:rgba(63,191,166,.14);color:var(--accent)}
+nav.mainnav button.active{background:color-mix(in srgb, var(--accent) 16%, transparent);color:var(--accent)}
 
 .admin-toggle{display:flex;align-items:center;gap:8px}
 .admin-toggle span{font-family:var(--mono);font-size:11px;color:var(--dim)}
+
+/* Hamburger — hidden on desktop, shown only below the mobile breakpoint */
+#hamburgerBtn{
+  display:none;flex-direction:column;justify-content:center;gap:4px;
+  width:34px;height:34px;background:transparent;border:1px solid var(--border);border-radius:8px;cursor:pointer;
+}
+#hamburgerBtn span{display:block;width:16px;height:2px;background:var(--text);margin:0 auto;border-radius:2px}
+#navDrawerBackdrop{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:29}
+
+@media (max-width: 860px){
+  .topbar-inner{flex-wrap:nowrap}
+  .brand-sub{display:none}
+  #hamburgerBtn{display:flex}
+  #navDrawer{
+    position:fixed;top:0;right:0;height:100vh;width:min(78vw,300px);z-index:30;
+    background:var(--panel2);border-left:1px solid var(--border);
+    padding:80px 18px 20px;display:flex;flex-direction:column;gap:16px;
+    transform:translateX(100%);transition:transform .25s ease;overflow-y:auto;
+    backdrop-filter:blur(20px);
+  }
+  #navDrawer.open{transform:translateX(0)}
+  #navDrawerBackdrop.open{display:block}
+  nav.mainnav{flex-direction:column;gap:2px}
+  nav.mainnav button{width:100%;text-align:left;padding:11px 12px}
+  .admin-toggle{flex-direction:column;align-items:stretch;gap:8px}
+  .admin-toggle select, .admin-toggle input{width:100%}
+}
 .switch{width:38px;height:21px;border-radius:999px;background:var(--border);position:relative;cursor:pointer;transition:.15s}
 .switch.on{background:var(--accent)}
 .switch .knob{position:absolute;top:2px;left:2px;width:17px;height:17px;border-radius:50%;background:#081410;transition:.15s}
@@ -366,7 +393,7 @@ label.fld>span{display:block;font-size:11px;color:var(--dim);margin-bottom:4px;t
 .checklist-item .row{display:flex;gap:6px}
 .checklist-item .row input,.checklist-item .row textarea{flex:1;min-height:36px;font-family:var(--ui)}
 .checklist-item[draggable="true"]:hover,.card[draggable="true"]:hover{border-color:var(--border-hi)}
-textarea.in{resize:vertical;line-height:1.4}
+textarea.in{resize:vertical;line-height:1.4;min-height:38px;overflow:hidden}
 
 /* ---------------------------------------------------------------------
    SLD DRAWING SLOT
@@ -400,6 +427,18 @@ a{color:var(--accent)}
 }
 .checklist-collapse-toggle:hover{border-color:var(--accent)}
 .checklist-collapse-toggle #clRefIcon{color:var(--accent);font-size:12px}
+.sticky-header{
+  position:sticky;top:60px;z-index:15;background:var(--panel2);backdrop-filter:blur(16px);
+  padding:12px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:14px;
+}
+.sticky-header-equip{
+  position:sticky;top:132px;z-index:14;background:var(--panel2);backdrop-filter:blur(16px);
+  padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:12px;
+}
+@media (max-width: 860px){
+  .sticky-header{top:56px}
+  .sticky-header-equip{top:150px}
+}
 .equip-icon{width:15px;height:15px;display:inline-block;vertical-align:-3px;margin-right:5px;color:var(--accent)}
 .equip-icon.lg{width:26px;height:26px;vertical-align:-7px;margin-right:8px}
 .tab .equip-icon{color:inherit}
