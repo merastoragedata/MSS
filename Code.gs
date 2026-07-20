@@ -50,8 +50,8 @@ const SHEET_DEFS = {
   [SHEET_CONFIG]: ["Key", "Value"],
   [SHEET_CHECKLIST]: ["BayID", "EquipCode", "Category", "SectionsJSON", "UpdatedBy", "UpdatedAt"],
   [SHEET_EQUIPINFO]: ["BayID", "EquipCode", "InfoJSON", "UpdatedBy", "UpdatedAt"],
-  [SHEET_MU]: ["ID", "BayID", "EquipCode", "Category", "Date", "PermitNo", "Remark", "Selected", "LoggedBy", "CreatedAt"],
-  [SHEET_TU]: ["ID", "BayID", "EquipCode", "Category", "Date", "PermitNo", "Remark", "Selected", "LoggedBy", "CreatedAt"],
+  [SHEET_MU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "Selected", "LoggedBy", "CreatedAt", "EquipCode"],
+  [SHEET_TU]: ["ID", "BayID", "Category", "Date", "PermitNo", "Remark", "Selected", "LoggedBy", "CreatedAt", "EquipCode"],
   [SHEET_EQUIP_MU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
   [SHEET_EQUIP_TU]: ["ID", "BayID", "EquipCode", "Date", "Remark", "ImagesJSON", "LoggedBy", "CreatedAt"],
   [SHEET_CUSTOM_EQUIP]: ["BayID", "Code", "Label", "EquipType", "PerPhase", "AddedBy", "AddedAt"],
@@ -86,12 +86,28 @@ function getSS() {
 function ensureSheet(name) {
   const ss = getSS();
   let sh = ss.getSheetByName(name);
+  const defHeaders = SHEET_DEFS[name];
   if (!sh) {
     sh = ss.insertSheet(name);
-    const headers = SHEET_DEFS[name];
-    if (headers) {
-      sh.getRange(1, 1, 1, headers.length).setValues([headers]);
+    if (defHeaders) {
+      sh.getRange(1, 1, 1, defHeaders.length).setValues([defHeaders]);
       sh.setFrozenRows(1);
+    }
+    return sh;
+  }
+  // Auto-migrate: if this sheet's actual header row is a PREFIX of the
+  // current schema (i.e. only missing NEW columns tacked on at the end,
+  // never reordered), extend it. This is what makes it safe to ever add a
+  // column to SHEET_DEFS again without corrupting already-written data --
+  // always append new fields at the end of a def's array, never insert in
+  // the middle.
+  if (defHeaders) {
+    const lastCol = Math.max(sh.getLastColumn(), 1);
+    const actual = sh.getRange(1, 1, 1, lastCol).getValues()[0].filter((h) => h !== "");
+    const isPrefixMatch = actual.every((h, i) => h === defHeaders[i]);
+    if (isPrefixMatch && actual.length < defHeaders.length) {
+      const missing = defHeaders.slice(actual.length);
+      sh.getRange(1, actual.length + 1, 1, missing.length).setValues([missing]);
     }
   }
   return sh;
@@ -581,7 +597,7 @@ function logEquipmentMaintenance(bayId, equipCode, groupId, entries, user) {
 }
 
 function appendGlobalRemark(sheetName, bayId, equipCode, category, date, permitNo, remark, loggedBy) {
-  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, equipCode || "", category, date, permitNo || "", remark, "FALSE", loggedBy || "unknown", new Date().toISOString()]);
+  getSheet(sheetName).appendRow([Utilities.getUuid(), bayId, category, date, permitNo || "", remark, "FALSE", loggedBy || "unknown", new Date().toISOString(), equipCode || ""]);
 }
 
 function toggleRemarkSelected(kind, id, selected) {
