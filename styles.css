@@ -380,6 +380,7 @@ label.fld>span{display:block;font-size:11px;color:var(--dim);margin-bottom:4px;t
 /* ---------------------------------------------------------------------
    MODAL
 --------------------------------------------------------------------- */
+#nestedModalRoot .modal-backdrop{ z-index:110; }
 .modal-backdrop{
   position:fixed;inset:0;background:rgba(5,10,8,.72);z-index:100;
   display:flex;align-items:center;justify-content:center;padding:20px;
