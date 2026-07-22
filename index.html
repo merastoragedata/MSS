@@ -92,6 +92,7 @@
   </div>
 
   <div id="modalRoot"></div>
+  <div id="nestedModalRoot"></div>
   <div id="lightboxRoot"></div>
   <script>
 /* =============================================================================
@@ -1073,6 +1074,19 @@ function pickRemark(checkpointText) {
   const arr = REMARK_POOLS[poolForText(checkpointText)];
   return arr[Math.floor(Math.random() * arr.length)];
 }
+// Combined pool = the 10 standard remarks for this category + any custom
+// "+Other" remarks saved for this specific equipment TYPE — shared across
+// every bay/instance of that equipment type, per your request.
+function combinedPoolFor(equipType, checkpointText) {
+  const category = poolForText(checkpointText);
+  const base = REMARK_POOLS[category] || REMARK_POOLS.general;
+  const custom = (State.customRemarks[`${equipType}::${category}`] || []);
+  return [...base, ...custom];
+}
+function pickRemarkFor(equipType, checkpointText) {
+  const pool = combinedPoolFor(equipType, checkpointText);
+  return pool[Math.floor(Math.random() * pool.length)];
+}
 
 // ---------------------------------------------------------------------------
 // 3) API CLIENT (real or demo/localStorage)
@@ -1080,7 +1094,7 @@ function pickRemark(checkpointText) {
 const DemoDB = {
   key: "karjat_portal_demo_v3",
   read() {
-    const blank = { bays: {}, customBays: [], records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {}, customEquip: {}, hiddenEquip: {}, rolePerms: {}, config: {} };
+    const blank = { bays: {}, customBays: [], records: [], prefillUsers: [], sld: {}, checklist: {}, equipInfo: {}, muFeed: [], tuFeed: [], equipMu: {}, equipTu: {}, customEquip: {}, hiddenEquip: {}, rolePerms: {}, config: {}, customRemarksList: [] };
     try { return { ...blank, ...(JSON.parse(localStorage.getItem(this.key)) || {}) }; }
     catch { return blank; }
   },
@@ -1140,6 +1154,7 @@ function demoGet(action, params) {
   if (action === "getCustomEquipment") return { items: db.customEquip[params.bayId] || [] };
   if (action === "getHiddenEquipment") return { codes: db.hiddenEquip[params.bayId] || [] };
   if (action === "getRolePermissions") return { perms: db.rolePerms || {} };
+  if (action === "getCustomRemarks") return { items: db.customRemarksList || [] };
   if (action === "getConfig") return { config: db.config || {} };
   if (action === "getEquipPanelBundle") {
     return {
@@ -1218,6 +1233,9 @@ function demoPost(action, body) {
     db.rolePerms = body.perms;
   } else if (action === "setConfig") {
     db.config = { ...(db.config || {}), ...(body.config || {}) };
+  } else if (action === "addCustomRemark") {
+    const dup = db.customRemarksList.some((r) => r.EquipType === body.equipType && r.PoolCategory === body.poolCategory && r.Remark === body.remark);
+    if (!dup) db.customRemarksList.push({ EquipType: body.equipType, PoolCategory: body.poolCategory, Remark: body.remark, AddedBy: body.user, AddedAt: new Date().toISOString() });
   } else if (action === "toggleRemarkSelected") {
     const feed = body.kind === "TU" ? db.tuFeed : db.muFeed;
     const rec = feed.find((r) => r.ID === body.id);
@@ -1296,6 +1314,7 @@ const State = {
   currentUser: "Guest User",
   _equipTab: {},   // bayId -> selected equipCode
   _catTab: {},     // equipCode -> selected category
+  customRemarks: {}, // "equipType::poolCategory" -> [remark, ...], fetched once at boot
 };
 function normalizeBayRow(r) {
   const s = (v) => (v === undefined || v === null ? "" : String(v).trim());
@@ -1410,6 +1429,13 @@ function busbarSVG() {
     ${[40,120,200,280,360].map(x => `<rect x="${x-3}" y="2" width="6" height="6" fill="var(--bg)" stroke="var(--amber)" stroke-width="1"/>`).join("")}
   </svg>`;
 }
+function statusBadgeClass(status) {
+  if (status === "Active") return "active";
+  if (status === "Commissioning Soon") return "soon";
+  if (status === "Future") return "future";
+  return "dim";
+}
+
 function statusIndicator(bay) {
   const isActive = bay.status === "Active";
   const inner = isActive
@@ -1738,8 +1764,9 @@ async function renderBayDetail(bayId) {
       <div class="empty-note">Loading bay remarks…</div>
     </div>
   `;
-  if (activeEquip) await renderEquipPanel(bay, equipment.find(e => e.code === activeEquip));
-  renderBayLevelRemarks(bay, equipment);
+  const equipPanelPromise = activeEquip ? renderEquipPanel(bay, equipment.find(e => e.code === activeEquip)) : Promise.resolve();
+  const bayRemarksPromise = renderBayLevelRemarks(bay, equipment);
+  await Promise.all([equipPanelPromise, bayRemarksPromise]);
 }
 
 async function renderBayLevelRemarks(bay, equipment) {
@@ -2003,10 +2030,47 @@ function toggleChecklistReference() {
   icon.textContent = open ? "▸" : "▾";
 }
 
+// ---- Equipment-info photo gallery -----------------------------------------
+// Previously images only attached to maintenance log entries and MU/TU
+// remarks, never to the equipment info panel itself. This lets an equipment's
+// Make/SrNo/etc edit form also carry its own set of photos (nameplate shots,
+// condition photos, etc), reusing the same PhotoStage/upload/lightbox
+// machinery already used everywhere else rather than inventing a new one.
+let _eiKeptImages = [];
+function eiKeptImagesGridHTML() {
+  return _eiKeptImages.map((url, i) => `
+    <div style="position:relative;width:64px;height:64px">
+      <img src="${url}" style="width:100%;height:100%;object-fit:cover;border-radius:6px;border:1px solid var(--border);cursor:pointer" onclick='openLightbox(${JSON.stringify(_eiKeptImages)}, ${i})'/>
+      <button type="button" onclick="removeKeptEquipImage(${i})" style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:var(--red);color:#fff;border:none;font-size:11px;cursor:pointer;line-height:1">✕</button>
+    </div>`).join("");
+}
+function removeKeptEquipImage(i) {
+  _eiKeptImages.splice(i, 1);
+  document.getElementById("ei_kept_images_grid").innerHTML = eiKeptImagesGridHTML();
+}
+function equipImagesSectionHTML(images) {
+  _eiKeptImages = (images || []).slice();
+  resetPhotoStage();
+  return `
+    <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
+      <span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Photos</span>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:8px 0" id="ei_kept_images_grid">${eiKeptImagesGridHTML()}</div>
+      ${renderPhotoPicker("ei_photos_input")}
+    </div>`;
+}
+async function collectEquipImages() {
+  return _eiKeptImages.concat(await commitStagedPhotos());
+}
+
 function renderEquipInfoDisplay(info, perPhase) {
+  const d = info || {};
+  const extra = Array.isArray(d.extraFields) ? d.extraFields.filter(f => f && f.label) : [];
+  const extraHTML = extra.length === 0 ? "" : `
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-top:10px;padding-top:10px;border-top:1px dashed var(--border)">
+      ${extra.map(f => `<div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase">${f.label}</div><div style="font-size:12.5px;margin-top:2px">${f.value || "—"}</div></div>`).join("")}
+    </div>`;
   if (perPhase) {
     const phases = ["R", "Y", "B"];
-    const d = info || {};
     return `<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px">
       ${phases.map(p => `
         <div style="border:1px solid var(--border);border-radius:8px;padding:8px">
@@ -2016,13 +2080,52 @@ function renderEquipInfoDisplay(info, perPhase) {
           <div style="font-size:11.5px;color:var(--dim)">DOC: <span style="color:var(--text)">${(d[p]&&d[p].doc)||"—"}</span></div>
         </div>
       `).join("")}
-    </div>`;
+    </div>${extraHTML}${renderSavedPhotoGrid(d.images)}`;
   }
-  const d = info || {};
   const rows = [["Make", d.make], ["Sr. No.", d.srNo], ["Type", d.type], ["Rated Voltage", d.ratedVoltage], ["Rated Amps", d.ratedAmps], ["DOC", d.doc]];
   return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px">
     ${rows.map(([k,v]) => `<div><div style="font-size:10.5px;color:var(--dim);text-transform:uppercase">${k}</div><div style="font-size:12.5px;margin-top:2px">${v||"—"}</div></div>`).join("")}
+  </div>${extraHTML}${renderSavedPhotoGrid(d.images)}`;
+}
+
+// ---- Arbitrary "add more fields" on any equipment's info panel ------------
+// Extra fields live in info.extraFields ([{label,value}]), independent of
+// perPhase vs flat equipment, since they describe the equipment as a whole
+// rather than one phase. Rows are added/removed live in the edit modal
+// without touching the standard Make/SrNo/etc inputs above them.
+let _eiExtraSeq = 0;
+function extraFieldRowHTML(id, label = "", value = "") {
+  return `<div class="ei-extra-row" id="ei_extra_${id}" style="display:flex;gap:8px;align-items:flex-end;margin-bottom:8px">
+    <label class="fld" style="flex:1;margin-bottom:0"><span>Field name</span><input class="in" id="ei_extra_${id}_label" value="${String(label).replace(/"/g,'&quot;')}" placeholder="e.g. Manufacturer"/></label>
+    <label class="fld" style="flex:1;margin-bottom:0"><span>Value</span><input class="in" id="ei_extra_${id}_value" value="${String(value).replace(/"/g,'&quot;')}"/></label>
+    <button class="btn ghost sm" onclick="document.getElementById('ei_extra_${id}').remove()" title="Remove field">✕</button>
   </div>`;
+}
+function addExtraFieldRow() {
+  document.getElementById("ei_extra_rows").insertAdjacentHTML("beforeend", extraFieldRowHTML(++_eiExtraSeq));
+}
+function extraFieldsSectionHTML(existing) {
+  _eiExtraSeq = 0;
+  const rows = (existing || []).filter(f => f && f.label).map(f => extraFieldRowHTML(++_eiExtraSeq, f.label, f.value));
+  return `
+    <div style="margin-top:14px;padding-top:12px;border-top:1px dashed var(--border)">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <span style="font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px">Additional fields</span>
+        <button class="btn ghost sm" onclick="addExtraFieldRow()">+ Add field</button>
+      </div>
+      <div id="ei_extra_rows">${rows.join("")}</div>
+    </div>`;
+}
+function collectExtraFields() {
+  return [...document.querySelectorAll(".ei-extra-row")]
+    .map((row) => {
+      const suffix = row.id.replace("ei_extra_", "");
+      return {
+        label: document.getElementById(`ei_extra_${suffix}_label`).value.trim(),
+        value: document.getElementById(`ei_extra_${suffix}_value`).value.trim(),
+      };
+    })
+    .filter((f) => f.label);
 }
 
 async function editEquipInfo(bayId, code, perPhase) {
@@ -2043,6 +2146,8 @@ async function editEquipInfo(bayId, code, perPhase) {
           </div>
         `).join("")}
       </div>
+      ${extraFieldsSectionHTML(d.extraFields)}
+      ${equipImagesSectionHTML(d.images)}
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
         <button class="btn ghost" onclick="closeModal()">Cancel</button>
         <button class="btn" onclick="saveEquipInfoPerPhase('${bayId}','${code}')">Save</button>
@@ -2059,6 +2164,8 @@ async function editEquipInfo(bayId, code, perPhase) {
         <label class="fld"><span>Rated Amps</span><input class="in" id="ei_ratedAmps" value="${(d.ratedAmps||"").replace(/"/g,'&quot;')}"/></label>
         <label class="fld"><span>DOC</span><input class="in" id="ei_doc" value="${(d.doc||"").replace(/"/g,'&quot;')}"/></label>
       </div>
+      ${extraFieldsSectionHTML(d.extraFields)}
+      ${equipImagesSectionHTML(d.images)}
       <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
         <button class="btn ghost" onclick="closeModal()">Cancel</button>
         <button class="btn" onclick="saveEquipInfoFlat('${bayId}','${code}')">Save</button>
@@ -2075,6 +2182,8 @@ async function saveEquipInfoPerPhase(bayId, code) {
       doc: document.getElementById(`ei_${p}_doc`).value,
     };
   });
+  newInfo.extraFields = collectExtraFields();
+  newInfo.images = await collectEquipImages();
   await apiPost("saveEquipmentInfo", { bayId, equipCode: code, info: newInfo, user: State.currentUser });
   closeModal();
   renderEquipPanel(getEntityBay(bayId), State._currentEquipList.find(e => e.code === code));
@@ -2087,6 +2196,8 @@ async function saveEquipInfoFlat(bayId, code) {
     ratedVoltage: document.getElementById("ei_ratedVoltage").value,
     ratedAmps: document.getElementById("ei_ratedAmps").value,
     doc: document.getElementById("ei_doc").value,
+    extraFields: collectExtraFields(),
+    images: await collectEquipImages(),
   };
   await apiPost("saveEquipmentInfo", { bayId, equipCode: code, info: newInfo, user: State.currentUser });
   closeModal();
@@ -2426,6 +2537,15 @@ async function renderCascadeStage() {
   const entry = emptyEntry(seed);
   Cascade.stageEntries[cat] = entry;
   const prefill = canPrefill();
+  Cascade.equipTypeForStage = equipType;
+
+  // Fresh checkpoint state per stage render. Seed value from the previous
+  // stage's answer (if cascading) or a fresh random pick, smart mode off by default.
+  Cascade.checkpointState = {};
+  sections.forEach((s) => s.items.forEach((it) => {
+    const seededVal = seed[it.id] ? (typeof seed[it.id] === "object" ? seed[it.id].value : seed[it.id]) : "";
+    Cascade.checkpointState[it.id] = { smart: false, value: seededVal || (prefill ? pickRemarkFor(equipType, it.text) : "") };
+  }));
 
   const root = document.getElementById("modalRoot");
   root.innerHTML = modalWrap(`
@@ -2440,15 +2560,7 @@ async function renderCascadeStage() {
         <div style="margin-bottom:10px">
           <div style="font-size:11.5px;color:var(--dim);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">${s.title}</div>
           ${s.description ? `<div style="font-size:11px;color:var(--dim);margin-bottom:6px;opacity:.8">${s.description}</div>` : ""}
-          ${s.items.map((it) => `
-            <div class="checklist-item">
-              <div style="font-size:12.5px;margin-bottom:6px">${it.text}</div>
-              <div class="row">
-                <textarea class="in" rows="1" data-cp="${it.id}" data-cp-text="${(it.text||"").replace(/"/g,'&quot;')}" placeholder="Remark…">${prefill ? pickRemark(it.text) : ""}</textarea>
-                ${prefill ? `<button class="btn ghost sm" onclick="prefillCascadeCP('${it.id}', ${JSON.stringify(it.text).replace(/"/g,'&quot;')})">↻</button>` : ""}
-              </div>
-            </div>
-          `).join("")}
+          ${s.items.map((it) => renderCheckpointRow(equipType, it, prefill)).join("")}
         </div>
       `).join("")}
     </div>
@@ -2462,6 +2574,145 @@ async function renderCascadeStage() {
   `);
   renderPhotoStageGrid();
   autoGrowAllTextareas();
+  wireCheckpointEvents();
+}
+
+// One row = checkbox (plain <-> smart mode) + control (textarea or select) + regenerate button.
+// "smart" mode = auto-prefilled AND rendered as a dropdown of known remarks + "+ Other".
+function renderCheckpointRow(equipType, item, prefillEnabled) {
+  const st = Cascade.checkpointState[item.id];
+  const pool = combinedPoolFor(equipType, item.text);
+  let controlHTML;
+  if (st.smart) {
+    // if the current value isn't already a pool option (e.g. a custom typed
+    // remark the user chose not to save), still show it selected this session
+    const opts = pool.includes(st.value) ? pool : (st.value ? [st.value, ...pool] : pool);
+    controlHTML = `
+      <select class="in cp-select" data-cp="${item.id}">
+        <option value="__other__">+ Other…</option>
+        ${opts.map((p) => `<option value="${p.replace(/"/g,'&quot;')}" ${p === st.value ? "selected" : ""}>${p}</option>`).join("")}
+      </select>`;
+  } else {
+    controlHTML = `<textarea class="in cp-textarea" data-cp="${item.id}" rows="1" placeholder="Remark…">${st.value}</textarea>`;
+  }
+  return `
+    <div class="checklist-item" id="cp-row-${item.id}" data-cp-text="${(item.text||"").replace(/"/g,'&quot;')}">
+      <div style="display:flex;align-items:flex-start;gap:8px">
+        <input type="checkbox" class="cp-smart-toggle" data-cp="${item.id}" style="margin-top:11px" ${st.smart ? "checked" : ""} title="Use dropdown of known remarks"/>
+        <div style="flex:1">
+          <div style="font-size:12.5px;margin-bottom:6px">${item.text}</div>
+          <div class="row">
+            ${controlHTML}
+            ${prefillEnabled ? `<button class="btn ghost sm cp-regen" data-cp="${item.id}">↻</button>` : ""}
+          </div>
+        </div>
+      </div>
+    </div>`;
+}
+
+// Event delegation on #ce_sections — one set of listeners handles every
+// checkpoint row regardless of how many times a row's control gets swapped
+// between textarea/select, since we always re-attach on stage render.
+function wireCheckpointEvents() {
+  const root = document.getElementById("ce_sections");
+  if (!root) return;
+  root.addEventListener("input", (e) => {
+    if (e.target.matches(".cp-textarea")) {
+      Cascade.checkpointState[e.target.dataset.cp].value = e.target.value;
+    }
+  });
+  root.addEventListener("change", (e) => {
+    if (e.target.matches(".cp-smart-toggle")) {
+      const id = e.target.dataset.cp;
+      Cascade.checkpointState[id].smart = e.target.checked;
+      if (e.target.checked && !Cascade.checkpointState[id].value) {
+        Cascade.checkpointState[id].value = pickRemarkFor(Cascade.equipTypeForStage, e.target.closest(".checklist-item").dataset.cpText);
+      }
+      rerenderCheckpointRow(id);
+    } else if (e.target.matches(".cp-select")) {
+      const id = e.target.dataset.cp;
+      if (e.target.value === "__other__") {
+        openOtherRemarkModal(id, e.target.closest(".checklist-item").dataset.cpText);
+      } else {
+        Cascade.checkpointState[id].value = e.target.value;
+      }
+    }
+  });
+  root.addEventListener("click", (e) => {
+    if (e.target.matches(".cp-regen")) {
+      const id = e.target.dataset.cp;
+      const cpText = e.target.closest(".checklist-item").dataset.cpText;
+      Cascade.checkpointState[id].value = pickRemarkFor(Cascade.equipTypeForStage, cpText);
+      rerenderCheckpointRow(id);
+    }
+  });
+}
+function rerenderCheckpointRow(id) {
+  const row = document.getElementById(`cp-row-${id}`);
+  if (!row) return;
+  const cpText = row.dataset.cpText;
+  // find the item object again just for its text (state already has id+value)
+  row.outerHTML = renderCheckpointRow(Cascade.equipTypeForStage, { id, text: cpText }, canPrefill());
+  autoGrowAllTextareas();
+}
+
+function openOtherRemarkModal(checkpointId, checkpointText) {
+  // Rendered into a SEPARATE nested-modal container stacked on top of the
+  // cascade logger, which stays alive and untouched underneath. (Previously
+  // this replaced modalRoot's innerHTML wholesale and restored it from a
+  // cached HTML string afterwards -- but textareas/selects/inputs only
+  // serialize their ORIGINAL default value into HTML, never the live value
+  // the user actually typed/picked. That silently reverted any in-progress
+  // edits on every OTHER checkpoint row, plus the Date/Permit/Logged-by
+  // fields, any time "+ Other..." was used. Never destroying the cascade
+  // modal's DOM in the first place avoids the whole class of bug.)
+  const currentVal = Cascade.checkpointState[checkpointId].value;
+  window._otherCheckpointText = checkpointText;
+  document.getElementById("nestedModalRoot").innerHTML = nestedModalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:12px">Other Remark</div>
+    <label class="fld"><span>Remark text</span><textarea class="in" id="other_text" rows="3">${currentVal && !combinedPoolFor(Cascade.equipTypeForStage, checkpointText).includes(currentVal) ? currentVal : ""}</textarea></label>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="cancelOtherRemark()">Cancel</button>
+      <button class="btn" onclick="submitOtherRemark('${checkpointId}')">Use this remark</button>
+    </div>
+  `);
+  autoGrowAllTextareas();
+}
+function cancelOtherRemark() {
+  document.getElementById("nestedModalRoot").innerHTML = "";
+}
+function submitOtherRemark(checkpointId) {
+  const text = document.getElementById("other_text").value.trim();
+  if (!text) return;
+  const checkpointText = window._otherCheckpointText;
+  const category = poolForText(checkpointText);
+  const alreadyKnown = combinedPoolFor(Cascade.equipTypeForStage, checkpointText).includes(text);
+  document.getElementById("nestedModalRoot").innerHTML = nestedModalWrap(`
+    <div style="font-family:var(--display);font-weight:700;font-size:16px;margin-bottom:8px">Save this for future use?</div>
+    <div style="color:var(--dim);font-size:12.5px;margin-bottom:16px">
+      ${alreadyKnown ? "This remark is already in the pool." : `Saving it adds it to the random-fill and dropdown options for every <b>${Cascade.equipTypeForStage}</b>-type equipment's checklist (all bays), not just this one.`}
+    </div>
+    <div style="display:flex;justify-content:flex-end;gap:8px">
+      <button class="btn ghost" onclick="finishOtherRemark('${checkpointId}', false)">Just use it this time</button>
+      ${alreadyKnown ? "" : `<button class="btn" onclick="finishOtherRemark('${checkpointId}', true)">Save for future</button>`}
+    </div>
+  `);
+  window._otherRemarkText = text;
+}
+async function finishOtherRemark(checkpointId, save) {
+  const text = window._otherRemarkText;
+  const checkpointText = window._otherCheckpointText;
+  const category = poolForText(checkpointText);
+  if (save) {
+    await apiPost("addCustomRemark", { equipType: Cascade.equipTypeForStage, poolCategory: category, remark: text, user: State.currentUser });
+    const key = `${Cascade.equipTypeForStage}::${category}`;
+    State.customRemarks[key] = State.customRemarks[key] || [];
+    if (!State.customRemarks[key].includes(text)) State.customRemarks[key].push(text);
+  }
+  Cascade.checkpointState[checkpointId].value = text;
+  Cascade.checkpointState[checkpointId].smart = true;
+  document.getElementById("nestedModalRoot").innerHTML = "";
+  rerenderCheckpointRow(checkpointId);
 }
 function prefillCascadeCP(id, text) {
   const el = document.querySelector(`textarea[data-cp="${CSS.escape(id)}"]`);
@@ -2469,8 +2720,11 @@ function prefillCascadeCP(id, text) {
 }
 async function collectCascadeForm() {
   const remarks = {};
-  document.querySelectorAll("#ce_sections textarea[data-cp]").forEach((t) => {
-    remarks[t.dataset.cp] = { text: t.dataset.cpText || t.dataset.cp, value: t.value };
+  document.querySelectorAll("#ce_sections .checklist-item[id^='cp-row-']").forEach((row) => {
+    const id = row.id.replace("cp-row-", "");
+    const cpText = row.dataset.cpText;
+    const st = Cascade.checkpointState[id];
+    remarks[id] = { text: cpText, value: st ? st.value : "" };
   });
   const images = await commitStagedPhotos();
   return {
@@ -2516,13 +2770,99 @@ async function finishCascade() {
 
 function modalWrap(inner) { return `<div class="modal-backdrop" onclick="if(event.target===this)closeModal()"><div class="modal">${inner}</div></div>`; }
 function closeModal() { document.getElementById("modalRoot").innerHTML = ""; }
+// Same look as modalWrap, but its backdrop only clears the NESTED root (not
+// the cascade logger sitting underneath it) when clicked outside the box.
+function nestedModalWrap(inner) { return `<div class="modal-backdrop" onclick="if(event.target===this)document.getElementById('nestedModalRoot').innerHTML=''"><div class="modal">${inner}</div></div>`; }
 
 // ---------------------------------------------------------------------------
 // GLOBAL MU / TU REMARK PAGES (station-wide feed, bay-level only)
 // ---------------------------------------------------------------------------
+function remarkRowHTML(r, kind) {
+  const selected = r.Selected === true || r.Selected === "TRUE";
+  return `
+    <div class="hist-row">
+      <div class="hist-top">
+        <span class="hist-date">${formatDateDisplay(r.Date)} · Bay ${r.BayID}${r.EquipCode ? ` (${r.EquipCode})` : ""} · ${r.Category}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
+          <button class="btn ${selected ? "" : "ghost"} sm" onclick="toggleRemarkStar('${kind}','${r.ID}', ${!selected})">${selected ? "★ Featured" : "☆ Feature on Home"}</button>
+          ${isAdmin() ? `
+            <button class="btn ghost sm" onclick="editGlobalRemarkPrompt('${kind}','${r.ID}')">edit</button>
+            <button class="btn danger sm" onclick="confirmDeleteGlobalRemark('${kind}','${r.ID}')">delete</button>
+          ` : ""}
+        </div>
+      </div>
+      <div style="font-size:12.5px;margin-top:6px">${r.Remark}</div>
+    </div>`;
+}
+
+// Bay-wise grouping follows the exact category breakdown the user specified:
+// "400 kV Lines, 400 kV ICT HV bays, 400 kV Tie, 220 kV ICT bays, 220 kV Line
+// Bays, 220 kV other bays" — plus an extra "Other bays" catch-all for
+// anything that doesn't fit those seven (33 kV bays, 400 kV Reactor/Future),
+// so no remark silently disappears from the grouped view.
+const BAY_GROUP_ORDER = ["400 kV Lines", "400 kV ICT HV bays", "400 kV Tie", "220 kV ICT bays", "220 kV Line Bays", "220 kV other bays", "Other bays"];
+function bayGroupFor(bay) {
+  if (!bay) return "Other bays";
+  if (bay.voltage === "400") {
+    if (bay.type === "Line") return "400 kV Lines";
+    if (bay.type === "ICT-HV") return "400 kV ICT HV bays";
+    if (bay.type === "Tie") return "400 kV Tie";
+    return "Other bays";
+  }
+  if (bay.voltage === "220") {
+    if (bay.type === "ICT-IV") return "220 kV ICT bays";
+    if (bay.type === "Line") return "220 kV Line Bays";
+    return "220 kV other bays";
+  }
+  return "Other bays";
+}
+
+// Equipment-wise grouping reuses the same CB/CT/Isolator/Wavetrap/CVT/LA
+// classification equipTypeFromCode() already applies everywhere else, so the
+// grouping here can never drift out of sync with the rest of the app. Entries
+// with no EquipCode (logged at bay level, not against a specific equipment)
+// and anything equipTypeFromCode maps to CRP/REACTOR/GENERIC33 fall into
+// "Other / bay-level".
+const EQUIP_GROUP_ORDER = ["CB", "CT", "ISOLATOR", "WAVETRAP", "CVT", "LA", "OTHER"];
+const EQUIP_GROUP_LABELS = { CB: "Circuit Breakers", CT: "Current Transformers", ISOLATOR: "Isolators (all types — A/B/C/D)", WAVETRAP: "Wave Traps", CVT: "CVTs", LA: "Lightning Arresters", OTHER: "Other / bay-level (no specific equipment)" };
+function equipGroupFor(r) {
+  if (!r.EquipCode) return "OTHER";
+  const t = equipTypeFromCode(r.EquipCode);
+  return EQUIP_GROUP_ORDER.includes(t) ? t : "OTHER";
+}
+
+function groupedRemarksHTML(list, kind, mode) {
+  if (mode === "flat") return list.map((r) => remarkRowHTML(r, kind)).join("");
+  const byBay = {};
+  State.bays.forEach((b) => { byBay[b.id] = b; });
+  const order = mode === "bay" ? BAY_GROUP_ORDER : EQUIP_GROUP_ORDER;
+  const groupOf = mode === "bay" ? (r) => bayGroupFor(byBay[r.BayID]) : equipGroupFor;
+  const labelOf = mode === "bay" ? (g) => g : (g) => EQUIP_GROUP_LABELS[g];
+  const buckets = {};
+  order.forEach((g) => (buckets[g] = []));
+  list.forEach((r) => { const g = groupOf(r); (buckets[g] = buckets[g] || []).push(r); });
+  return order
+    .filter((g) => buckets[g].length > 0)
+    .map((g) => `
+      <details class="section-block" open>
+        <summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:13.5px;padding:6px 0">${labelOf(g)} · ${buckets[g].length}</summary>
+        ${buckets[g].map((r) => remarkRowHTML(r, kind)).join("")}
+      </details>`)
+    .join("");
+}
+
+const RemarksViewMode = { MU: "flat", TU: "flat" };
+function setRemarksViewMode(kind, mode) {
+  RemarksViewMode[kind] = mode;
+  renderGlobalRemarks(kind);
+}
+
 async function renderGlobalRemarks(kind) {
   const { records } = await apiGet("getGlobalRemarks", { kind });
   const list = (records || []).slice().sort((a,b) => new Date(b.Date) - new Date(a.Date));
+  const mode = RemarksViewMode[kind];
+  const modeBtn = (m, label) => `<button class="btn ${mode === m ? "" : "ghost"} sm" onclick="setRemarksViewMode('${kind}','${m}')">${label}</button>`;
   app.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:10px">
       <div>
@@ -2532,25 +2872,12 @@ async function renderGlobalRemarks(kind) {
       <button class="btn" onclick="openMultiBayRemarkModal('${kind}')">+ Add Remark</button>
     </div>
     ${busbarSVG()}
-    ${list.length === 0 ? `<div class="empty-note">No ${kind} remarks logged yet.</div>` : list.map((r) => {
-      const selected = r.Selected === true || r.Selected === "TRUE";
-      return `
-      <div class="hist-row">
-        <div class="hist-top">
-          <span class="hist-date">${formatDateDisplay(r.Date)} · Bay ${r.BayID}${r.EquipCode ? ` (${r.EquipCode})` : ""} · ${r.Category}${r.PermitNo ? ` · Permit ${r.PermitNo}` : ""}</span>
-          <div style="display:flex;align-items:center;gap:10px">
-            <span style="color:var(--dim)">${r.LoggedBy || "—"}</span>
-            <button class="btn ${selected ? "" : "ghost"} sm" onclick="toggleRemarkStar('${kind}','${r.ID}', ${!selected})">${selected ? "★ Featured" : "☆ Feature on Home"}</button>
-            ${isAdmin() ? `
-              <button class="btn ghost sm" onclick="editGlobalRemarkPrompt('${kind}','${r.ID}')">edit</button>
-              <button class="btn danger sm" onclick="confirmDeleteGlobalRemark('${kind}','${r.ID}')">delete</button>
-            ` : ""}
-          </div>
-        </div>
-        <div style="font-size:12.5px;margin-top:6px">${r.Remark}</div>
-      </div>
-    `;
-    }).join("")}
+    <div style="display:flex;gap:8px;margin:14px 0">
+      ${modeBtn("flat", "Flat list")}
+      ${modeBtn("bay", "Bay wise")}
+      ${modeBtn("equip", "Equipment wise")}
+    </div>
+    ${list.length === 0 ? `<div class="empty-note">No ${kind} remarks logged yet.</div>` : groupedRemarksHTML(list, kind, mode)}
   `;
 }
 function editGlobalRemarkPrompt(kind, id) {
@@ -2803,11 +3130,18 @@ document.getElementById("roleSelect").addEventListener("change", (e) => { State.
 document.getElementById("userNameInput").addEventListener("change", (e) => { State.currentUser = e.target.value.trim() || "Guest User"; });
 (async function boot() {
   try {
-    const [, permsRes] = await Promise.all([loadAll(), apiGet("getRolePermissions")]);
+    const [, permsRes, customRes] = await Promise.all([loadAll(), apiGet("getRolePermissions"), apiGet("getCustomRemarks")]);
     if (State.bootError) { renderBootError(State.bootError); return; }
     const perms = permsRes.__error ? {} : (permsRes.perms || {});
     State.muFullAccess = perms.MU_FULL_ACCESS === "true";
     State.tuFullAccess = perms.TU_FULL_ACCESS === "true";
+    if (!customRes.__error) {
+      (customRes.items || []).forEach((r) => {
+        const key = `${r.EquipType}::${r.PoolCategory}`;
+        State.customRemarks[key] = State.customRemarks[key] || [];
+        State.customRemarks[key].push(r.Remark);
+      });
+    }
     render();
     initWeather();
   } catch (e) {
