@@ -38,6 +38,7 @@ const SHEET_EQUIP_TU = "Equipment_TU_Remarks";  // equipment-level ad hoc, NOT m
 const SHEET_CUSTOM_EQUIP = "CustomEquipment";   // user-added equipment beyond the auto-template
 const SHEET_HIDDEN_EQUIP = "HiddenEquipment";   // template equipment "deleted" (hidden, reversible)
 const SHEET_ROLE_PERMS = "RolePermissions";     // e.g. MU_FULL_ACCESS / TU_FULL_ACCESS flags
+const SHEET_CUSTOM_REMARKS = "CustomRemarks";   // user-saved "+Other" remarks, shared per equipType+poolCategory
 
 // Single source of truth for every tab's header row. Used by both the
 // one-time initialize() and the self-healing getSheet() (so if a future
@@ -57,6 +58,7 @@ const SHEET_DEFS = {
   [SHEET_CUSTOM_EQUIP]: ["BayID", "Code", "Label", "EquipType", "PerPhase", "AddedBy", "AddedAt"],
   [SHEET_HIDDEN_EQUIP]: ["BayID", "EquipCode", "HiddenBy", "HiddenAt"],
   [SHEET_ROLE_PERMS]: ["Key", "Value"],
+  [SHEET_CUSTOM_REMARKS]: ["EquipType", "PoolCategory", "Remark", "AddedBy", "AddedAt"],
 };
 
 // ---------------------------------------------------------------------------
@@ -235,6 +237,9 @@ function doGet(e) {
       case "getRolePermissions":
         result = { perms: getConfigMapFrom(SHEET_ROLE_PERMS) };
         break;
+      case "getCustomRemarks":
+        result = { items: getAllRows(SHEET_CUSTOM_REMARKS) };
+        break;
       default:
         result = { error: "Unknown action: " + action };
     }
@@ -307,6 +312,9 @@ function doPost(e) {
         break;
       case "setConfig":
         result = mergeConfigMapTo(SHEET_CONFIG, body.config);
+        break;
+      case "addCustomRemark":
+        result = addCustomRemark(body.equipType, body.poolCategory, body.remark, body.user);
         break;
       case "toggleRemarkSelected":
         result = toggleRemarkSelected(body.kind, body.id, body.selected);
@@ -482,6 +490,18 @@ function mergeConfigMapTo(sheetName, updates) {
   const existing = getConfigMapFrom(sheetName);
   const merged = { ...existing, ...(updates || {}) };
   return setConfigMapTo(sheetName, merged);
+}
+
+// A remark saved here becomes available (for prefill AND the dropdown) on
+// every checkpoint of this equipType that maps to this pool category,
+// across EVERY bay that has that equipment type -- shared, not per-bay.
+function addCustomRemark(equipType, poolCategory, remark, user) {
+  const sh = getSheet(SHEET_CUSTOM_REMARKS);
+  const existing = getAllRows(SHEET_CUSTOM_REMARKS);
+  const dup = existing.some((r) => r.EquipType === equipType && r.PoolCategory === poolCategory && r.Remark === remark);
+  if (dup) return { ok: true, duplicate: true };
+  sh.appendRow([equipType, poolCategory, remark, user || "unknown", new Date().toISOString()]);
+  return { ok: true };
 }
 
 function safeParse(str) {
